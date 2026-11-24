@@ -245,11 +245,11 @@ Chaque module a son fichier de test. Exemples de cas vérifiés :
  
 | Membre | Rôle | Fichiers |
 |---|---|---|
-| Membre 1 | Données et base de données | `db.py`, `data.py` |
-| Membre 2 | Module Information | `module_info.py` |
-| Membre 3 | Analyse technique + coordination des livrables | `module_technique.py`, `docs/` |
-| Membre 4 | Financier, risque et décision | `module_financier.py`, `decision.py` |
-| Membre 5 | Front-end | `app.py` |
+| Papa | Données et base de données | `db.py`, `data.py` |
+| JP | Module Information | `module_info.py` |
+| KONATE Boubacar | Analyse technique + coordination des livrables | `module_technique.py`, `docs/` |
+| Axel | Financier, risque et décision | `module_financier.py`, `decision.py` |
+| RIVIERE Constance | Front-end | `app.py` |
  
 **Méthode de travail** : une branche Git par module, et une pull request relue par un autre membre avant chaque fusion.
  
