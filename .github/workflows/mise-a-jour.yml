@@ -48,8 +48,17 @@ jobs:
       - name: Installer Ollama et le LLM open source
         run: |
           curl -fsSL https://ollama.com/install.sh | sh
-          # Le serveur Ollama démarre tout seul ; on attend qu'il réponde.
-          for i in $(seq 1 30); do curl -sf "$LLM_URL/api/tags" >/dev/null && break; sleep 2; done
+          # Sur le serveur GitHub, systemd ne tourne pas : le serveur Ollama ne démarre pas
+          # tout seul. On le lance nous-mêmes en arrière-plan (journal dans ollama.log).
+          if ! curl -sf "$LLM_URL/api/tags" >/dev/null; then
+            nohup ollama serve > "$RUNNER_TEMP/ollama.log" 2>&1 &
+          fi
+          # On attend qu'il réponde (60 secondes au plus), sinon on s'arrête avec son journal.
+          for i in $(seq 1 30); do
+            curl -sf "$LLM_URL/api/tags" >/dev/null && break
+            if [ "$i" = 30 ]; then cat "$RUNNER_TEMP/ollama.log"; exit 1; fi
+            sleep 2
+          done
           ollama pull "$LLM_MODELE"
 
       - name: Vérifier que le LLM répond
