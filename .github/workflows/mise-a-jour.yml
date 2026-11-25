@@ -1,0 +1,81 @@
+# Mise à jour automatique de bourse.db par GitHub (gratuit, rien à installer chez personne).
+#
+# Plusieurs fois par jour en semaine, un serveur de GitHub :
+#   1. installe Ollama et un LLM open source (aucun compte, aucune clé, aucun jeton payant) ;
+#   2. lance data.py (cours, chiffres, actualités), module_info.py (sentiment des titres par
+#      le LLM) puis decision.py (notes des 4 modules et conseils) ;
+#   3. enregistre le nouveau bourse.db dans le dépôt. Le site (app.py) n'a plus qu'à le lire.
+#
+# Important : GitHub ne lance les tâches planifiées QUE depuis la branche principale (main).
+# Ce fichier ne fonctionne donc qu'une fois la branche fusionnée dans main.
+# Lancement à la main : onglet Actions -> « Mise à jour des données » -> Run workflow.
+
+name: Mise à jour des données
+
+on:
+  schedule:
+    # Heures UTC (Paris = UTC+1 en hiver, UTC+2 en été) : ~9h40, ~13h40 et ~17h50 à Paris en hiver.
+    - cron: "40 8,12 * * 1-5"
+    - cron: "50 16 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write          # nécessaire pour enregistrer bourse.db dans le dépôt
+
+concurrency:
+  group: mise-a-jour-donnees
+  cancel-in-progress: false  # deux mises à jour ne tournent jamais en même temps
+
+jobs:
+  mise-a-jour:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      LLM_MODELE: qwen2.5:3b       # modèle open source (≈ 1,9 Go), bon en français
+      LLM_URL: http://localhost:11434
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Installer les bibliothèques utiles au calcul
+        run: pip install pandas numpy yfinance requests "SQLAlchemy>=2.0" python-dotenv
+
+      - name: Installer Ollama et le LLM open source
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          # Le serveur Ollama démarre tout seul ; on attend qu'il réponde.
+          for i in $(seq 1 30); do curl -sf "$LLM_URL/api/tags" >/dev/null && break; sleep 2; done
+          ollama pull "$LLM_MODELE"
+
+      - name: Vérifier que le LLM répond
+        # Si le LLM ne répond pas, on arrête tout : sinon les titres seraient notés par le
+        # lexique de secours et garderaient cette note moins fine.
+        run: |
+          curl -sf "$LLM_URL/api/chat" -d "{\"model\": \"$LLM_MODELE\", \"stream\": false,
+            \"messages\": [{\"role\": \"user\", \"content\": \"Réponds OK\"}]}" | head -c 300
+
+      - name: Mettre à jour les cours, les chiffres et les actualités
+        run: python data.py
+
+      - name: Noter les actualités (module Information)
+        run: python module_info.py
+
+      - name: Calculer les notes et les conseils
+        run: python decision.py
+
+      - name: Enregistrer bourse.db dans le dépôt
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bourse.db
+          if git diff --cached --quiet; then
+            echo "Aucun changement dans la base."
+          else
+            git commit -m "Mise à jour automatique des données ($(date -u '+%Y-%m-%d %H:%M') UTC)"
+            git push
+          fi

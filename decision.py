@@ -226,13 +226,18 @@ def calculer_notes(engine, ticker: str) -> None:
     """Fait tourner les 4 modules pour une action et enregistre leurs notes.
 
     Convention à valider avec JP et KONATE Boubacar : module_info.py et
-    module_technique.py exposent une fonction analyser(ticker) qui renvoie le
-    format commun. Tant qu'un module n'existe pas, sa note est « indisponible »
-    et l'application continue de fonctionner (UC6).
+    module_technique.py exposent une fonction analyser(ticker) ou
+    analyser(ticker, engine) qui renvoie le format commun. Tant qu'un module
+    n'existe pas, sa note est « indisponible » et l'application continue de
+    fonctionner (UC6).
     """
+    import inspect
     for module, nom_fichier in (("information", "module_info"), ("technique", "module_technique")):
         try:
-            res = __import__(nom_fichier).analyser(ticker)
+            analyser = __import__(nom_fichier).analyser
+            # On passe la connexion à la base si le module l'accepte (même base pour tous).
+            accepte_engine = len(inspect.signature(analyser).parameters) >= 2
+            res = analyser(ticker, engine) if accepte_engine else analyser(ticker)
         except Exception:            # module pas encore écrit, ou erreur : il ne bloque pas les autres
             res = mf.indisponible(ticker, f"module {module} indisponible")
         mf.enregistrer_score(engine, res, module)
