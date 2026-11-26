@@ -127,9 +127,13 @@ export async function appeler<T>(chemin: string, options?: RequestInit): Promise
   }
   if (!reponse.ok) {
     if (reponse.status === 404) throw new ErreurApi("Cette action n'est pas suivie par le conseiller.");
+    if (reponse.status === 504)
+      throw new ErreurApi("Le serveur a mis trop de temps à répondre. Réessayez dans un instant.");
     throw new ErreurApi(
       reponse.status >= 500
-        ? "Le serveur d'analyse est injoignable. Vérifiez qu'il est lancé (uvicorn api:app --port 8000)."
+        ? process.env.NODE_ENV === "development"
+          ? "Le serveur d'analyse est injoignable. Vérifiez qu'il est lancé (uvicorn api:app --port 8000)."
+          : `Le serveur d'analyse a rencontré une erreur (${reponse.status}). Réessayez dans un instant.`
         : `Erreur ${reponse.status}`,
     );
   }

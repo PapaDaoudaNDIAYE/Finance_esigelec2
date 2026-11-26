@@ -36,6 +36,7 @@ import math
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import datetime, time as heure
 
 from fastapi import FastAPI, HTTPException, Request
@@ -230,7 +231,7 @@ def actualiser_directement() -> dict:
         return {**vide, "etape": "Une mise à jour est déjà en cours. Affichage rechargé."}
     debut = datetime.now(data.PARIS).strftime("%Y-%m-%d %H:%M:%S")
     try:
-        resultat = rafraichir()
+        resultat = rafraichir(delai_max=delai_max())
     finally:
         _verrou.release()
     fin = datetime.now(data.PARIS).strftime("%Y-%m-%d %H:%M:%S")
@@ -287,22 +288,61 @@ def secret_valide(request: Request) -> bool:
     return bool(secret) and hmac.compare_digest(entete.encode(), attendu.encode())
 
 
-def rafraichir(tickers: list[str] | None = None) -> dict:
-    """Met à jour les données (data.py) puis calcule les conseils (decision.py), action par
-    action. Une erreur sur une action ou une source n'empêche pas de traiter les autres."""
-    maj, erreurs = [], []
+DELAI_MAX_VERCEL = 40    # s : une requête Vercel est coupée à 60 s ; on répond avant, quoi qu'il arrive
+FILS_VERCEL = 3          # actions traitées en parallèle sur Vercel (= connexions du pool PostgreSQL)
+
+
+def rafraichir_action(ticker: str, client: str) -> tuple[dict | None, list[dict]]:
+    """Met à jour une action (data.py) puis calcule son conseil (decision.py).
+    Renvoie (résumé du conseil ou None, erreurs). Ne lève jamais d'exception."""
+    erreurs = []
+    try:
+        rapport = data.mettre_a_jour(ENGINE, [ticker]).get(ticker, {})
+        for source, message in rapport.items():         # data.py ne plante jamais : il rend
+            if not str(message).startswith("ok"):        # « ok ... » ou un message d'erreur
+                erreurs.append({"action": ticker, "etape": source, "message": message})
+        conseil = decision.calculer_conseil(ENGINE, ticker, client)
+        return {"action": ticker, "signal": conseil["signal"], "score_final": conseil["score_final"]}, erreurs
+    except Exception as e:
+        erreurs.append({"action": ticker, "etape": "conseil", "message": f"{type(e).__name__} : {e}"})
+        return None, erreurs
+
+
+def rafraichir(tickers: list[str] | None = None, delai_max: float | None = None) -> dict:
+    """Met à jour les données puis calcule les conseils, action par action. Une erreur sur une
+    action ou une source n'empêche pas de traiter les autres.
+
+    delai_max (Vercel) : les actions sont traitées en parallèle et la fonction rend la main au
+    bout de delai_max secondes au plus ; les actions pas encore finies sont signalées dans
+    « erreurs » (elles seront reprises au passage suivant). Sans delai_max : une par une."""
+    tickers = list(tickers or db.TICKERS)
     client = decision.nom_client()
-    for ticker in tickers or db.TICKERS:
-        try:
-            rapport = data.mettre_a_jour(ENGINE, [ticker]).get(ticker, {})
-            for source, message in rapport.items():         # data.py ne plante jamais : il rend
-                if not str(message).startswith("ok"):        # « ok ... » ou un message d'erreur
-                    erreurs.append({"action": ticker, "etape": source, "message": message})
-            conseil = decision.calculer_conseil(ENGINE, ticker, client)
-            maj.append({"action": ticker, "signal": conseil["signal"], "score_final": conseil["score_final"]})
-        except Exception as e:
-            erreurs.append({"action": ticker, "etape": "conseil", "message": f"{type(e).__name__} : {e}"})
+    resultats = {}
+    if delai_max is None:
+        for ticker in tickers:
+            resultats[ticker] = rafraichir_action(ticker, client)
+    else:
+        pool = ThreadPoolExecutor(max_workers=FILS_VERCEL)
+        taches = {pool.submit(rafraichir_action, t, client): t for t in tickers}
+        finies, _ = wait(taches, timeout=delai_max)
+        pool.shutdown(wait=False, cancel_futures=True)   # on n'attend pas les retardataires
+        for tache in finies:
+            resultats[taches[tache]] = tache.result()
+    maj, erreurs = [], []
+    for ticker in tickers:
+        if ticker not in resultats:
+            erreurs.append({"action": ticker, "etape": "délai",
+                            "message": f"pas terminée en {delai_max:.0f} s, reprise au prochain passage"})
+            continue
+        resume, err = resultats[ticker]
+        erreurs.extend(err)
+        if resume:
+            maj.append(resume)
     return {"maj": maj, "erreurs": erreurs}
+
+
+def delai_max() -> float | None:
+    return DELAI_MAX_VERCEL if db.SUR_VERCEL else None
 
 
 @app.api_route("/api/refresh", methods=["GET", "POST"])
@@ -322,7 +362,7 @@ def refresh(request: Request, force: bool = False):
         return {"ok": True, "maj": [], "erreurs": [], "duree_s": 0.0,
                 "message": "une mise à jour est déjà en cours"}
     try:
-        resultat = rafraichir()
+        resultat = rafraichir(delai_max=delai_max())
     finally:
         _verrou.release()
     return {"ok": True, **resultat, "duree_s": round(time.monotonic() - debut, 1)}

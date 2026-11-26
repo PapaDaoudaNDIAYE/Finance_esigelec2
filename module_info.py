@@ -51,7 +51,8 @@ MAX_ARTICLES = 15            # on lit au plus les 15 titres les plus récents pa
 NB_RAISONS_INFO = 3          # raisons renvoyées à decision.py
 DEMI_VIE_JOURS = 3           # un article de 3 jours compte 2 fois moins qu'un article du jour
 SEUIL_NEUTRE = 0.15          # |note| < 0,15 : nouvelle jugée neutre
-DELAI_LLM = 180              # secondes max pour la réponse du LLM (le 1er appel charge le modèle)
+DELAI_LLM = 20 if os.getenv("VERCEL") else 180   # s max pour la réponse du LLM (le 1er appel charge le modèle ;
+                                                   # sur Vercel, une requête est coupée à 60 s)
 
 # Méthode utilisée lors de la dernière notation (affichée par main) : « LLM » ou « lexique (raison) ».
 derniere_methode = "aucune"

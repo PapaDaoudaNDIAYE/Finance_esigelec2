@@ -147,7 +147,7 @@ def test_bouton_actualiser_sur_vercel_met_a_jour_tout_de_suite(monkeypatch):
     monkeypatch.setattr(api.db, "SUR_VERCEL", True)
     monkeypatch.setattr(api, "minutes_depuis_derniere_maj", lambda: 30.0)
     appels = []
-    monkeypatch.setattr(api, "rafraichir", lambda: appels.append(1) or
+    monkeypatch.setattr(api, "rafraichir", lambda **k: appels.append(1) or
                         {"maj": [{"action": "AI.PA", "signal": "Conserver", "score_final": 0}], "erreurs": []})
     r = client.post("/api/actualiser").json()
     assert appels == [1]
@@ -157,7 +157,7 @@ def test_bouton_actualiser_sur_vercel_met_a_jour_tout_de_suite(monkeypatch):
 def test_bouton_actualiser_sur_vercel_pas_deux_fois_en_2_minutes(monkeypatch):
     monkeypatch.setattr(api.db, "SUR_VERCEL", True)
     monkeypatch.setattr(api, "minutes_depuis_derniere_maj", lambda: 0.5)
-    monkeypatch.setattr(api, "rafraichir", lambda: (_ for _ in ()).throw(AssertionError("ne doit pas tourner")))
+    monkeypatch.setattr(api, "rafraichir", lambda **k: (_ for _ in ()).throw(AssertionError("ne doit pas tourner")))
     r = client.post("/api/actualiser").json()
     assert r["lance"] is False and r["en_cours"] is False and "2 minutes" in r["etape"]
 
@@ -165,7 +165,7 @@ def test_bouton_actualiser_sur_vercel_pas_deux_fois_en_2_minutes(monkeypatch):
 def test_bouton_actualiser_sur_vercel_echec_total(monkeypatch):
     monkeypatch.setattr(api.db, "SUR_VERCEL", True)
     monkeypatch.setattr(api, "minutes_depuis_derniere_maj", lambda: None)
-    monkeypatch.setattr(api, "rafraichir", lambda: {"maj": [], "erreurs": [{"action": "AI.PA"}]})
+    monkeypatch.setattr(api, "rafraichir", lambda **k: {"maj": [], "erreurs": [{"action": "AI.PA"}]})
     r = client.post("/api/actualiser").json()
     assert r["erreur"] and r["en_cours"] is False
 
@@ -176,3 +176,19 @@ def test_minutes_depuis_derniere_maj():
     ecart = api.minutes_depuis_derniere_maj()
     assert ecart is not None and -1 < ecart < 2
     assert api.minutes_depuis_derniere_maj(datetime.now(paris) + timedelta(minutes=10)) > 9
+
+
+def test_rafraichir_rend_la_main_a_temps(monkeypatch):
+    """Sur Vercel : actions en parallèle, réponse au bout du délai même si une source traîne."""
+    import time as _t
+
+    def lente(ticker, client):
+        if ticker == "TTE.PA":
+            _t.sleep(3)
+        return {"action": ticker, "signal": "Conserver", "score_final": 0}, []
+    monkeypatch.setattr(api, "rafraichir_action", lente)
+    debut = _t.monotonic()
+    r = api.rafraichir(delai_max=1)
+    assert _t.monotonic() - debut < 2.5
+    assert "TTE.PA" not in [m["action"] for m in r["maj"]] and len(r["maj"]) == 4
+    assert any(e["action"] == "TTE.PA" and e["etape"] == "délai" for e in r["erreurs"])

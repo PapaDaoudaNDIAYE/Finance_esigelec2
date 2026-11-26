@@ -46,8 +46,10 @@ PARIS = ZoneInfo("Europe/Paris")
 # -----------------------------------------------------------------------------
 PERIODE_COURS = "1y"          # 1 an d'historique : assez pour la MM200 et la volatilité
 JOURS_ACTUALITES = 7          # le README parle d'actualités « de moins de 7 jours »
-DELAI_RESEAU = 15             # secondes d'attente maximum par requête internet
-ESSAIS = 3                    # nombre d'essais si une source répond mal (ex. erreur 429)
+# Sur Vercel, une requête est coupée à 60 s : on attend moins et on réessaie moins.
+SUR_VERCEL = bool(os.getenv("VERCEL"))
+DELAI_RESEAU = 8 if SUR_VERCEL else 15     # secondes d'attente maximum par requête internet
+ESSAIS = 2 if SUR_VERCEL else 3            # nombre d'essais si une source répond mal (ex. erreur 429)
 
 # Horaires de la bourse de Paris (Euronext), heure de Paris.
 OUVERTURE = heure(9, 0)
