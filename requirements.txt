@@ -1,13 +1,9 @@
-# Calcul et données
+# Dépendances de l'API, installées par Vercel pour la fonction Python (api/index.py).
+# Gardées légères : plus la fonction est petite, plus elle démarre vite.
 pandas
 numpy
-yfinance
-requests
 SQLAlchemy>=2.0
 python-dotenv
-# API web lue par le front-end Next.js (dossier web/)
 fastapi
-uvicorn[standard]
-# Tests
-pytest
-httpx
+requests
+tzdata

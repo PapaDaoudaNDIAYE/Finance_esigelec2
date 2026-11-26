@@ -12,8 +12,8 @@ import { classeSignal, dateCourte, dateDuJour, euros, note } from "@/lib/format"
 const CAPITAL = 500_000;
 
 export default function Accueil() {
-  const etat = useApi<Etat>("/api/etat");
-  const actions = useApi<ActionResume[]>("/api/actions");
+  const etat = useApi<Etat>("/api/py/etat");
+  const actions = useApi<ActionResume[]>("/api/py/actions");
   const toutRecharger = () => { etat.recharger(); actions.recharger(); };
 
   const liste = actions.data ?? [];

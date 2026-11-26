@@ -7,3 +7,10 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .venv/
+# Front-end Next.js
+node_modules/
+.next/
+next-env.d.ts
+*.tsbuildinfo
+.vercel/
+.env*.local

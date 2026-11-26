@@ -1,0 +1,9 @@
+{
+  "framework": "nextjs",
+  "functions": {
+    "api/index.py": {
+      "includeFiles": "{*.py,bourse.db}",
+      "excludeFiles": "{node_modules/**,.next/**,tests/**,app/**,components/**,lib/**}"
+    }
+  }
+}

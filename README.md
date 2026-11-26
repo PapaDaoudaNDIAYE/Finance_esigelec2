@@ -115,13 +115,13 @@ Tous les modules renvoient exactement cette structure :
  │ (RSS)            │  │  └────────────────────────┘  │
  └──────────────────┘  ▼            ▲   │            ▼
                   ┌─────────┐       │   │      ┌─────────────┐    ┌──────────┐  JSON  ┌──────────────┐
-                  │ data.py │──► bourse.db ◄── │ decision.py │    │  api.py  │──────► │ web/ Next.js │
+                  │ data.py │──► bourse.db ◄── │ decision.py │    │serveur.py│──────► │   Next.js    │
                   └─────────┘     (SQLite) ──────────────────────► │ FastAPI  │        │ (port 3000)  │
                                                                    └──────────┘        └──────────────┘
 ```
 
 La base de données est le point central : chaque module lit ses données dans la base et y écrit sa note.
-L'API (`api.py`) lit la base et la sert en JSON ; le front-end Next.js (`web/`) n'appelle que l'API.
+L'API (`serveur.py`) lit la base et la sert en JSON ; le site Next.js n'appelle que l'API.
 
 **Technologies** : Python 3.11+, pandas, numpy, yfinance, SQLAlchemy + SQLite, Ollama (LLM open source local),
 FastAPI + Uvicorn, Next.js 15 + React 19 + TypeScript, lightweight-charts (graphiques TradingView), pytest.
@@ -133,7 +133,9 @@ FastAPI + Uvicorn, Next.js 15 + React 19 + TypeScript, lightweight-charts (graph
 ```
 Finance_esigelec2/
 ├── README.md
-├── requirements.txt          # dépendances Python
+├── requirements.txt          # dépendances de l'API (installées par Vercel)
+├── requirements-dev.txt      # + yfinance, uvicorn, pytest : pour travailler en local
+├── vercel.json               # configuration du déploiement Vercel
 ├── .env.example              # modèle du fichier de configuration
 ├── config.py                 # tickers, poids, seuils
 ├── db.py                     # schéma et connexion à la base
@@ -142,16 +144,17 @@ Finance_esigelec2/
 ├── module_technique.py       # module Analyse technique
 ├── module_financier.py       # modules Financier et Risque
 ├── decision.py               # pondération, seuils, phrase finale
-├── api.py                    # API web FastAPI lue par le front-end
+├── serveur.py                # API web FastAPI (routes /api/py/...)
+├── api/index.py              # point d'entrée de l'API pour Vercel (importe serveur.py)
 ├── bourse.db                 # base SQLite (versionnée : mise à jour par GitHub Actions)
 ├── .github/workflows/
 │   └── mise-a-jour.yml       # mise à jour automatique 3 fois par jour
 ├── tests/                    # un fichier de test par module + test_api.py
-└── web/                      # front-end Next.js
-    ├── app/page.tsx          # accueil (UC1)
-    ├── app/action/[ticker]/  # détail d'une action (UC2, UC3)
-    ├── components/           # graphique, jauge, cartes, en-tête
-    └── lib/                  # appels à l'API, mise en forme
+├── app/                      # pages Next.js : accueil (UC1), action/[ticker] (UC2, UC3)
+├── components/               # graphique, jauge, cartes, en-tête
+├── lib/                      # appels à l'API, mise en forme
+├── package.json              # dépendances du site
+└── next.config.mjs           # relaie /api/py/... vers l'API Python
 ```
 
 ---
@@ -185,12 +188,10 @@ python -m venv .venv
 .venv\Scripts\activate
 # macOS / Linux
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 
-# Front-end
-cd web
+# Site
 npm install
-cd ..
 ```
 
 Facultatif : installer [Ollama](https://ollama.com) puis `ollama pull qwen2.5:7b` pour que les actualités
@@ -226,16 +227,35 @@ Les poids et les seuils se règlent dans `config.py`.
 python data.py
 python decision.py
 
-# 2. Lancer l'API (terminal 1, à la racine du projet)
-uvicorn api:app --port 8000
+# 2. Lancer l'API (terminal 1)
+uvicorn serveur:app --port 8000
 
 # 3. Lancer le site (terminal 2)
-cd web
 npm run dev
 ```
 
-Le site s'ouvre à l'adresse `http://localhost:3000` ; la documentation de l'API est sur `http://localhost:8000/docs`.
-Le bouton **Actualiser** relance l'étape 1 en arrière-plan sans quitter le site.
+Le site s'ouvre à l'adresse `http://localhost:3000` ; la documentation de l'API est sur
+`http://localhost:8000/api/py/docs`. Le bouton **Actualiser** relance l'étape 1 en arrière-plan.
+
+---
+
+## Déploiement sur Vercel
+
+Le site Next.js et l'API Python sont déployés dans **un seul projet Vercel** : Vercel transforme
+`api/index.py` en fonction Python, et `next.config.mjs` lui envoie les requêtes `/api/py/...`.
+
+1. Fusionner le code dans `main` sur GitHub.
+2. Créer un jeton GitHub (Settings → Developer settings → Fine-grained tokens) limité à ce dépôt,
+   avec la permission **Actions : Read and write**.
+3. Sur [vercel.com/new](https://vercel.com/new), importer le dépôt (Root Directory : la racine,
+   Framework : Next.js).
+4. Ajouter les variables d'environnement : `NOM_CLIENT`, `GITHUB_TOKEN` (le jeton) et
+   `GITHUB_REPO` (`proprietaire/nom-du-depot`).
+5. Cliquer sur **Deploy**.
+
+Sur Vercel, le bouton **Actualiser** déclenche la tâche GitHub Actions « Mise à jour des données » :
+elle recalcule tout avec le LLM et publie `bourse.db`, puis Vercel redéploie le site avec les
+nouvelles données (5 à 10 minutes en tout).
 
 ---
 
@@ -260,7 +280,7 @@ Chaque module a son fichier de test. Exemples de cas vérifiés :
 | JP | Module Information | `module_info.py` |
 | KONATE Boubacar | Analyse technique + coordination des livrables | `module_technique.py`, `docs/` |
 | Axel | Financier, risque et décision | `module_financier.py`, `decision.py` |
-| RIVIERE Constance | Front-end | `web/` (Next.js), `api.py` |
+| RIVIERE Constance | Front-end | `app/`, `components/`, `lib/`, `serveur.py` |
  
 **Méthode de travail** : une branche Git par module, et une pull request relue par un autre membre avant chaque fusion.
  

@@ -22,6 +22,7 @@ export interface Etat {
   maintenant: string;
   seuils: { achat: number; vente: number };
   mise_a_jour: Tache;
+  mode_actualisation: "local" | "github";
 }
 
 export interface ActionResume {
@@ -129,7 +130,7 @@ export async function appeler<T>(chemin: string, options?: RequestInit): Promise
     if (reponse.status === 404) throw new ErreurApi("Cette action n'est pas suivie par le conseiller.");
     throw new ErreurApi(
       reponse.status >= 500
-        ? "Le serveur d'analyse est injoignable. Vérifiez qu'il est lancé (uvicorn api:app --port 8000)."
+        ? "Le serveur d'analyse est injoignable. Vérifiez qu'il est lancé (uvicorn serveur:app --port 8000)."
         : `Erreur ${reponse.status}`,
     );
   }
@@ -173,11 +174,14 @@ export function useActualisation(quandFini: () => void, tacheInitiale?: Tache | 
     minuteur.current = null;
   };
 
-  const suivre = useCallback(() => {
+  // « depuis » = heure du clic : sur Vercel, l'API retrouve ainsi l'exécution GitHub Actions
+  // lancée par ce clic (en local, ce paramètre est ignoré).
+  const suivre = useCallback((depuis?: string | null) => {
     arreter();
+    const chemin = `/api/py/actualiser${depuis ? `?depuis=${encodeURIComponent(depuis)}` : ""}`;
     minuteur.current = setInterval(async () => {
       try {
-        const t = await appeler<Tache>("/api/actualiser");
+        const t = await appeler<Tache>(chemin);
         setTache(t);
         if (!t.en_cours) {
           arreter();
@@ -187,7 +191,7 @@ export function useActualisation(quandFini: () => void, tacheInitiale?: Tache | 
         arreter();
         setTache((t) => (t ? { ...t, en_cours: false, erreur: "Suivi de la mise à jour interrompu." } : t));
       }
-    }, 2000);
+    }, 3000);
   }, []);
 
   // Une mise à jour lancée depuis un autre onglet est déjà en cours : on la suit.
@@ -202,9 +206,9 @@ export function useActualisation(quandFini: () => void, tacheInitiale?: Tache | 
 
   const lancer = useCallback(async () => {
     try {
-      const t = await appeler<Tache>("/api/actualiser", { method: "POST" });
+      const t = await appeler<Tache>("/api/py/actualiser", { method: "POST" });
       setTache(t);
-      suivre();
+      if (t.en_cours) suivre(t.debut);   // refusée (déjà en cours, non configurée) : rien à suivre
     } catch (e) {
       setTache({
         en_cours: false, etape: null, debut: null, fin: null,
