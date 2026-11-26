@@ -9,7 +9,8 @@ PLACE DANS L'APPLICATION :
                                          ──►  /        (site Next.js exporté dans web/out/)
 
 L'API ne fait que LIRE la base, sauf :
-    - /api/actualiser : bouton « Actualiser » du site, en local (mise à jour en arrière-plan) ;
+    - /api/actualiser : bouton « Actualiser » du site (en local : en arrière-plan ; sur Vercel :
+                        pendant la requête, au plus une fois toutes les 2 minutes) ;
     - /api/refresh    : mise à jour complète protégée par REFRESH_SECRET, appelée toutes les
                         15 minutes par GitHub Actions (.github/workflows/refresh.yml).
 
@@ -17,7 +18,7 @@ ROUTES :
     GET       /api/etat               nom du client, marché ouvert/fermé, dernière mise à jour
     GET       /api/actions            les 5 actions : cours, variation, mini-graphique, conseil (UC1)
     GET       /api/actions/{ticker}   tout le détail d'une action (UC2, UC3, UC6, UC7)
-    POST      /api/actualiser         relance la mise à jour complète (UC4, en local)
+    POST      /api/actualiser         relance la mise à jour complète (UC4)
     GET       /api/actualiser         avancement de la mise à jour en cours
     GET/POST  /api/refresh            mise à jour complète (en-tête Authorization: Bearer <secret>)
     /                                 le site (fichiers de web/out/, créés par « npm run build »)
@@ -199,18 +200,54 @@ def _mettre_a_jour():
         _verrou.release()
 
 
-MESSAGE_AUTOMATIQUE = ("Les données sont mises à jour automatiquement toutes les 15 minutes "
-                       "pendant la séance. Affichage rechargé.")
+DELAI_MINIMAL_MIN = 2    # en ligne : pas de nouvelle mise à jour moins de 2 min après la précédente
+
+
+def minutes_depuis_derniere_maj(maintenant: datetime | None = None) -> float | None:
+    """Minutes écoulées depuis la dernière mise à jour réussie (lue dans la base, donc commune
+    à toutes les instances Vercel). None si aucune mise à jour n'a encore été faite."""
+    derniere = db.derniere_mise_a_jour(ENGINE)
+    if not derniere:
+        return None
+    try:
+        quand = datetime.strptime(derniere[:16], "%Y-%m-%d %H:%M").replace(tzinfo=data.PARIS)
+    except ValueError:
+        return None
+    return ((maintenant or datetime.now(data.PARIS)) - quand).total_seconds() / 60
+
+
+def actualiser_directement() -> dict:
+    """Bouton « Actualiser » sur Vercel : la mise à jour est faite PENDANT la requête (environ
+    5 s pour les 5 actions, sous la limite de 60 s), car une tâche en arrière-plan y serait
+    coupée dès la réponse envoyée. Pas de secret (il serait visible dans le site) : à la place,
+    on refuse de relancer moins de DELAI_MINIMAL_MIN minutes après la dernière mise à jour."""
+    vide = {"lance": False, "en_cours": False, "debut": None, "fin": None, "erreur": None}
+    ecart = minutes_depuis_derniere_maj()
+    if ecart is not None and ecart < DELAI_MINIMAL_MIN:
+        return {**vide, "etape": (f"Les données viennent d'être mises à jour (il y a moins de "
+                                  f"{DELAI_MINIMAL_MIN} minutes). Affichage rechargé.")}
+    if not _verrou.acquire(blocking=False):
+        return {**vide, "etape": "Une mise à jour est déjà en cours. Affichage rechargé."}
+    debut = datetime.now(data.PARIS).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        resultat = rafraichir()
+    finally:
+        _verrou.release()
+    fin = datetime.now(data.PARIS).strftime("%Y-%m-%d %H:%M:%S")
+    if not resultat["maj"]:
+        return {**vide, "lance": True, "debut": debut, "fin": fin, "etape": None,
+                "erreur": "La mise à jour a échoué pour toutes les actions. Réessayez plus tard."}
+    n = len(resultat["erreurs"])
+    etape = "Terminé" if not n else f"Conseils recalculés ({n} source(s) indisponible(s) pour l'instant)."
+    return {**vide, "lance": True, "debut": debut, "fin": fin, "etape": etape}
 
 
 @app.post("/api/actualiser")
 def lancer_actualisation():
-    # Sur Vercel, une fonction s'arrête dès qu'elle a répondu : une mise à jour en
-    # arrière-plan serait coupée. Le bouton recharge alors simplement l'affichage ; la mise à
-    # jour, elle, est faite par /api/refresh, appelée par GitHub Actions.
+    # Sur Vercel, une fonction s'arrête dès qu'elle a répondu : pas de fil en arrière-plan,
+    # la mise à jour est faite tout de suite (voir actualiser_directement).
     if db.SUR_VERCEL:
-        return {"lance": False, "en_cours": False, "etape": MESSAGE_AUTOMATIQUE,
-                "debut": None, "fin": None, "erreur": None}
+        return actualiser_directement()
     if not _verrou.acquire(blocking=False):
         return {"lance": False, **TACHE}         # une mise à jour tourne déjà
     TACHE.update(en_cours=True, etape="Démarrage", erreur=None, fin=None,

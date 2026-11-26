@@ -201,11 +201,14 @@ export function useActualisation(quandFini: () => void, tacheInitiale?: Tache | 
   useEffect(() => arreter, []);
 
   const lancer = useCallback(async () => {
+    // En ligne (Vercel), la mise à jour est faite pendant la requête (quelques secondes) :
+    // on affiche « en cours » dès le clic. En local, la réponse arrive tout de suite.
+    setTache({ en_cours: true, etape: "Récupération des cours, chiffres et actualités", debut: null, fin: null, erreur: null });
     try {
       const t = await appeler<Tache>("/api/actualiser", { method: "POST" });
       setTache(t);
       if (t.en_cours) suivre();
-      else rappel.current();   // rien à suivre (en ligne : mise à jour automatique) -> on recharge
+      else rappel.current();   // déjà terminé (en ligne) -> on recharge les données
     } catch (e) {
       setTache({
         en_cours: false, etape: null, debut: null, fin: null,

@@ -6,6 +6,7 @@ Lancement depuis la racine du projet : pytest tests/
 import os
 import sys
 import tempfile
+from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -141,8 +142,37 @@ def test_le_site_est_servi_apres_les_routes_api():
         assert client.get("/action/AI.PA/").status_code == 200
 
 
-def test_bouton_actualiser_sur_vercel_ne_lance_rien(monkeypatch):
-    """Sur Vercel, pas de mise à jour en arrière-plan (elle serait coupée) : message clair."""
+def test_bouton_actualiser_sur_vercel_met_a_jour_tout_de_suite(monkeypatch):
+    """Sur Vercel, le bouton fait la mise à jour pendant la requête (pas d'arrière-plan)."""
     monkeypatch.setattr(api.db, "SUR_VERCEL", True)
+    monkeypatch.setattr(api, "minutes_depuis_derniere_maj", lambda: 30.0)
+    appels = []
+    monkeypatch.setattr(api, "rafraichir", lambda: appels.append(1) or
+                        {"maj": [{"action": "AI.PA", "signal": "Conserver", "score_final": 0}], "erreurs": []})
     r = client.post("/api/actualiser").json()
-    assert r["lance"] is False and r["en_cours"] is False and "15 minutes" in r["etape"]
+    assert appels == [1]
+    assert r["lance"] is True and r["en_cours"] is False and r["etape"] == "Terminé" and r["erreur"] is None
+
+
+def test_bouton_actualiser_sur_vercel_pas_deux_fois_en_2_minutes(monkeypatch):
+    monkeypatch.setattr(api.db, "SUR_VERCEL", True)
+    monkeypatch.setattr(api, "minutes_depuis_derniere_maj", lambda: 0.5)
+    monkeypatch.setattr(api, "rafraichir", lambda: (_ for _ in ()).throw(AssertionError("ne doit pas tourner")))
+    r = client.post("/api/actualiser").json()
+    assert r["lance"] is False and r["en_cours"] is False and "2 minutes" in r["etape"]
+
+
+def test_bouton_actualiser_sur_vercel_echec_total(monkeypatch):
+    monkeypatch.setattr(api.db, "SUR_VERCEL", True)
+    monkeypatch.setattr(api, "minutes_depuis_derniere_maj", lambda: None)
+    monkeypatch.setattr(api, "rafraichir", lambda: {"maj": [], "erreurs": [{"action": "AI.PA"}]})
+    r = client.post("/api/actualiser").json()
+    assert r["erreur"] and r["en_cours"] is False
+
+
+def test_minutes_depuis_derniere_maj():
+    paris = api.data.PARIS
+    db.noter_journal(api.ENGINE, "AI.PA", "test", "ok")
+    ecart = api.minutes_depuis_derniere_maj()
+    assert ecart is not None and -1 < ecart < 2
+    assert api.minutes_depuis_derniere_maj(datetime.now(paris) + timedelta(minutes=10)) > 9

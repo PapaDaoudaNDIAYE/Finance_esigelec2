@@ -45,6 +45,7 @@ import json
 import os
 import shutil
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import (Boolean, Column, Float, MetaData, String, Table, Text, and_,
                         create_engine, delete, func, insert, select)
@@ -270,8 +271,14 @@ def aujourd_hui() -> str:
     return date.today().isoformat()
 
 
+def heure_paris() -> datetime:
+    """Heure de Paris, sans fuseau (les dates de la base sont en heure de Paris). Nécessaire
+    sur Vercel, dont les serveurs sont à l'heure UTC."""
+    return datetime.now(ZoneInfo("Europe/Paris")).replace(tzinfo=None)
+
+
 def maintenant() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M")
+    return heure_paris().strftime("%Y-%m-%d %H:%M")
 
 
 # -----------------------------------------------------------------------------
@@ -396,7 +403,7 @@ def lire_dernier_cours(engine, ticker: str) -> dict | None:
 
 def lire_actualites(engine, ticker: str, jours: int = 7, a_partir_de: datetime | None = None) -> list[dict]:
     """Actualités de moins de « jours » jours, de la plus récente à la plus ancienne."""
-    limite = ((a_partir_de or datetime.now()) - timedelta(days=jours)).strftime("%Y-%m-%d %H:%M")
+    limite = ((a_partir_de or heure_paris()) - timedelta(days=jours)).strftime("%Y-%m-%d %H:%M")
     return _lire(engine, select(actualites)
                  .where(and_(actualites.c.ticker == ticker, actualites.c.date >= limite))
                  .order_by(actualites.c.date.desc()))

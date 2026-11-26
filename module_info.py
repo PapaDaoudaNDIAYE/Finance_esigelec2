@@ -239,7 +239,7 @@ def noter_info(ticker: str, articles: list[dict], reglages: dict | None = None,
     articles = preparer_articles(articles)
     if not articles:
         return indisponible(ticker, f"aucune actualité de moins de {JOURS_RECENTS} jours"), []
-    maintenant = maintenant or datetime.now()
+    maintenant = maintenant or db.heure_paris()    # Vercel est à l'heure UTC
 
     # Les articles déjà notés lors d'un lancement précédent gardent leur note.
     global derniere_methode
