@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import json
 import math
-import os
 from datetime import date
 
 import numpy as np
@@ -282,14 +281,10 @@ def noter_risque(ticker: str, clotures) -> dict:
 # LIRE « fondamentaux » et « cours », et ÉCRIRE dans « scores ».
 
 def moteur():
-    """Connexion à la base : DATABASE_URL du fichier .env, sinon sqlite:///bourse.db."""
-    from sqlalchemy import create_engine
-    try:
-        from dotenv import load_dotenv               # lit le fichier .env s'il existe
-        load_dotenv()
-    except ImportError:
-        pass
-    return create_engine(os.getenv("DATABASE_URL", "sqlite:///bourse.db"))
+    """Connexion à la base, la même que pour tout le projet (db.get_engine) :
+    DATABASE_URL (SQLite ou PostgreSQL), sinon le fichier bourse.db du projet."""
+    import db
+    return db.get_engine()
 
 
 def lire_fondamentaux(engine, ticker: str) -> dict | None:

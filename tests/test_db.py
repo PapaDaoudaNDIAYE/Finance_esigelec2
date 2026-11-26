@@ -75,3 +75,34 @@ def test_lecture_base_vide_ne_plante_pas(tmp_path):
     assert db.lire_actualites(vide, "AI.PA") == []
     assert db.lire_scores(vide, "AI.PA") == {}
     assert len(db.lire_actions(vide)) == 5                          # l'accueil s'affiche quand même
+
+
+# ----------------------------------------------------------------------------- PostgreSQL / Vercel
+
+def test_adresses_postgresql_converties_pour_psycopg():
+    assert db.normaliser_url("postgres://u:p@h/b") == "postgresql+psycopg://u:p@h/b"
+    assert db.normaliser_url("postgresql://u:p@h/b?sslmode=require") == "postgresql+psycopg://u:p@h/b?sslmode=require"
+    assert db.normaliser_url("postgresql+psycopg://u:p@h/b") == "postgresql+psycopg://u:p@h/b"
+    assert db.normaliser_url("sqlite:///bourse.db") == "sqlite:///bourse.db"
+
+
+def test_chemin_sqlite_relatif_au_projet(monkeypatch):
+    """« sqlite:///bourse.db » désigne le fichier du projet, quel que soit le dossier courant."""
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///bourse.db")
+    monkeypatch.delenv("VERCEL", raising=False)
+    assert os.path.samefile(db.url_base()[len("sqlite:///"):], db.BASE_LOCALE) or \
+        db.url_base() == f"sqlite:///{db.BASE_LOCALE}"
+
+
+def test_migration_relancee_sans_doublon(tmp_path):
+    import migrer_sqlite_vers_postgres as migration
+    source = db.creer_base(db.get_engine(f"sqlite:///{tmp_path / 'source.db'}"))
+    db.enregistrer_cours(source, "AI.PA", [{"date": "2026-11-24", "cloture": 150.0},
+                                           {"date": "2026-11-25", "cloture": 151.0}])
+    db.enregistrer_actualites(source, "AI.PA", [{"lien": "l1", "titre": "t", "date": "2026-11-25 10:00"}])
+    cible_url = f"sqlite:///{tmp_path / 'cible.db'}"
+    for _ in range(2):                                   # deux fois : aucun doublon
+        migration.migrer(f"sqlite:///{tmp_path / 'source.db'}", cible_url)
+    cible = db.get_engine(cible_url)
+    assert db.lire_clotures(cible, "AI.PA") == [150.0, 151.0]
+    assert len(db.lire_actions(cible)) == 5

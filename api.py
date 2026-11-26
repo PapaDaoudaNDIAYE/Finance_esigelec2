@@ -1,42 +1,55 @@
 """
-api.py — API web du Conseiller Bourse (lue par le front-end Next.js du dossier web/)
+api.py — Application web du Conseiller Bourse : API JSON + site (FastAPI)
 
 PLACE DANS L'APPLICATION :
 
-    data.py ─► bourse.db ◄─ modules + decision.py
+    data.py ─► base (SQLite en local, PostgreSQL en ligne) ◄─ modules + decision.py
                    │
-                   └──lit──  CE FICHIER (FastAPI, port 8000)  ──JSON──►  web/ (Next.js, port 3000)
+                   └──lit──  CE FICHIER  ──►  /api/...  (JSON)
+                                         ──►  /        (site Next.js exporté dans web/out/)
 
-L'API ne fait que LIRE la base, sauf la route « actualiser » qui relance tout le calcul
-(data.py puis les 4 modules puis decision.py) en arrière-plan (UC4).
+L'API ne fait que LIRE la base, sauf :
+    - /api/actualiser : bouton « Actualiser » du site, en local (mise à jour en arrière-plan) ;
+    - /api/refresh    : mise à jour complète protégée par REFRESH_SECRET, appelée toutes les
+                        15 minutes par GitHub Actions (.github/workflows/refresh.yml).
 
 ROUTES :
-    GET  /api/etat                  nom du client, marché ouvert/fermé, dernière mise à jour
-    GET  /api/actions               les 5 actions : cours, variation, mini-graphique, conseil (UC1)
-    GET  /api/actions/{ticker}      tout le détail d'une action (UC2, UC3, UC6, UC7)
-    POST /api/actualiser            relance la mise à jour complète (UC4)
-    GET  /api/actualiser            avancement de la mise à jour en cours
+    GET       /api/etat               nom du client, marché ouvert/fermé, dernière mise à jour
+    GET       /api/actions            les 5 actions : cours, variation, mini-graphique, conseil (UC1)
+    GET       /api/actions/{ticker}   tout le détail d'une action (UC2, UC3, UC6, UC7)
+    POST      /api/actualiser         relance la mise à jour complète (UC4, en local)
+    GET       /api/actualiser         avancement de la mise à jour en cours
+    GET/POST  /api/refresh            mise à jour complète (en-tête Authorization: Bearer <secret>)
+    /                                 le site (fichiers de web/out/, créés par « npm run build »)
 
-LANCEMENT :
-    uvicorn api:app --reload --port 8000
+LANCEMENT (local) :
+    uvicorn api:app --reload --port 8000     puis http://localhost:8000
     Documentation interactive : http://localhost:8000/docs
+    Sur Vercel : pyproject.toml indique « api:app » comme point d'entrée.
 """
 
 from __future__ import annotations
 
+import hmac
 import math
+import os
 import threading
-from datetime import datetime
+import time
+from datetime import datetime, time as heure
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 import data
 import db
 import decision
 import module_technique as mt
 
-app = FastAPI(title="Conseiller Bourse", version="1.0")
+DOSSIER_SITE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "out")
+
+app = FastAPI(title="Conseiller Bourse", version="1.1")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
                    allow_methods=["*"], allow_headers=["*"])
 
@@ -186,8 +199,18 @@ def _mettre_a_jour():
         _verrou.release()
 
 
+MESSAGE_AUTOMATIQUE = ("Les données sont mises à jour automatiquement toutes les 15 minutes "
+                       "pendant la séance. Affichage rechargé.")
+
+
 @app.post("/api/actualiser")
 def lancer_actualisation():
+    # Sur Vercel, une fonction s'arrête dès qu'elle a répondu : une mise à jour en
+    # arrière-plan serait coupée. Le bouton recharge alors simplement l'affichage ; la mise à
+    # jour, elle, est faite par /api/refresh, appelée par GitHub Actions.
+    if db.SUR_VERCEL:
+        return {"lance": False, "en_cours": False, "etape": MESSAGE_AUTOMATIQUE,
+                "debut": None, "fin": None, "erreur": None}
     if not _verrou.acquire(blocking=False):
         return {"lance": False, **TACHE}         # une mise à jour tourne déjà
     TACHE.update(en_cours=True, etape="Démarrage", erreur=None, fin=None,
@@ -199,3 +222,80 @@ def lancer_actualisation():
 @app.get("/api/actualiser")
 def suivi_actualisation():
     return dict(TACHE)
+
+
+# -----------------------------------------------------------------------------
+# 4. MISE À JOUR AUTOMATIQUE : /api/refresh (appelée par GitHub Actions)
+# -----------------------------------------------------------------------------
+
+FIN_RELEVE = heure(18, 0)    # après la clôture (17 h 30), encore 30 min pour relever le cours de clôture
+
+
+def seance_ou_cloture(moment: datetime | None = None) -> bool:
+    """Vrai pendant la séance d'Euronext Paris ET jusqu'à 18 h : les cours ont 15 minutes de
+    retard, il faut donc un dernier passage après 17 h 30 pour enregistrer la clôture."""
+    moment = (moment or datetime.now(data.PARIS)).astimezone(data.PARIS)
+    if data.marche_ouvert(moment):
+        return True
+    return (moment.weekday() < 5 and moment.date() not in data.jours_feries(moment.year)
+            and data.FERMETURE <= moment.time() < FIN_RELEVE)
+
+
+def secret_valide(request: Request) -> bool:
+    """En-tête « Authorization: Bearer <REFRESH_SECRET> ». Sans secret configuré : toujours refusé."""
+    db.charger_env()
+    secret = os.getenv("REFRESH_SECRET") or ""
+    entete = request.headers.get("authorization", "")
+    attendu = f"Bearer {secret}"
+    return bool(secret) and hmac.compare_digest(entete.encode(), attendu.encode())
+
+
+def rafraichir(tickers: list[str] | None = None) -> dict:
+    """Met à jour les données (data.py) puis calcule les conseils (decision.py), action par
+    action. Une erreur sur une action ou une source n'empêche pas de traiter les autres."""
+    maj, erreurs = [], []
+    client = decision.nom_client()
+    for ticker in tickers or db.TICKERS:
+        try:
+            rapport = data.mettre_a_jour(ENGINE, [ticker]).get(ticker, {})
+            for source, message in rapport.items():         # data.py ne plante jamais : il rend
+                if not str(message).startswith("ok"):        # « ok ... » ou un message d'erreur
+                    erreurs.append({"action": ticker, "etape": source, "message": message})
+            conseil = decision.calculer_conseil(ENGINE, ticker, client)
+            maj.append({"action": ticker, "signal": conseil["signal"], "score_final": conseil["score_final"]})
+        except Exception as e:
+            erreurs.append({"action": ticker, "etape": "conseil", "message": f"{type(e).__name__} : {e}"})
+    return {"maj": maj, "erreurs": erreurs}
+
+
+@app.api_route("/api/refresh", methods=["GET", "POST"])
+def refresh(request: Request, force: bool = False):
+    """Mise à jour complète, protégée par REFRESH_SECRET.
+
+    Hors séance (et après 18 h), ne fait rien, sauf avec ?force=1 (lancement manuel).
+    Réponse : {"ok": true, "maj": [...], "erreurs": [...], "duree_s": ...}.
+    """
+    if not secret_valide(request):
+        return JSONResponse({"ok": False, "erreur": "non autorisé"}, status_code=401)
+    debut = time.monotonic()
+    if not force and not seance_ou_cloture():
+        return {"ok": True, "maj": [], "erreurs": [], "duree_s": 0.0,
+                "message": "marché fermé : aucune mise à jour"}
+    if not _verrou.acquire(blocking=False):
+        return {"ok": True, "maj": [], "erreurs": [], "duree_s": 0.0,
+                "message": "une mise à jour est déjà en cours"}
+    try:
+        resultat = rafraichir()
+    finally:
+        _verrou.release()
+    return {"ok": True, **resultat, "duree_s": round(time.monotonic() - debut, 1)}
+
+
+# -----------------------------------------------------------------------------
+# 5. LE SITE (déclaré APRÈS toutes les routes /api/ pour ne pas les masquer)
+# -----------------------------------------------------------------------------
+# web/out/ contient le site Next.js exporté (« npm run build » dans web/).
+# html=True : « /action/AI.PA/ » sert web/out/action/AI.PA/index.html.
+
+if os.path.isdir(DOSSIER_SITE):
+    app.mount("/", StaticFiles(directory=DOSSIER_SITE, html=True), name="web")

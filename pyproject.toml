@@ -1,0 +1,3 @@
+# Point d'entrée de l'application pour Vercel : l'objet FastAPI « app » du fichier api.py.
+[tool.vercel]
+entrypoint = "api:app"

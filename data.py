@@ -35,6 +35,8 @@ from email.utils import parsedate_to_datetime
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
+import os
+
 import db
 
 PARIS = ZoneInfo("Europe/Paris")
@@ -66,6 +68,15 @@ class SourceIndisponible(Exception):
     """Une source (Yahoo, Google Actualités) n'a pas répondu ou n'a rien renvoyé."""
 
 
+def _yfinance():
+    """Importe yfinance. Sur Vercel, seul /tmp est modifiable : son cache (fuseaux horaires,
+    cookies) y est donc rangé, sinon il essaierait d'écrire dans le dossier de l'utilisateur."""
+    import yfinance
+    if os.getenv("VERCEL"):
+        yfinance.set_tz_cache_location("/tmp/yf-cache")
+    return yfinance
+
+
 # -----------------------------------------------------------------------------
 # 1. COURS (yfinance)
 # -----------------------------------------------------------------------------
@@ -76,7 +87,7 @@ def charger_cours(ticker: str, periode: str = PERIODE_COURS) -> list[dict]:
     Renvoie une liste de lignes prêtes pour la table « cours ».
     Lève SourceIndisponible si Yahoo ne renvoie rien (coupure, ticker inconnu...).
     """
-    import yfinance as yf
+    yf = _yfinance()
     historique = yf.Ticker(ticker).history(period=periode, auto_adjust=False)
     if historique is None or historique.empty:
         raise SourceIndisponible(f"aucun cours reçu de Yahoo Finance pour {ticker}")
@@ -114,7 +125,7 @@ def charger_fondamentaux(ticker: str) -> dict:
 
     Une valeur introuvable vaut None : module_financier.py l'ignore simplement.
     """
-    import yfinance as yf
+    yf = _yfinance()
     action = yf.Ticker(ticker)
     info = action.info or {}
     try:

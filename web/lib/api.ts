@@ -204,7 +204,8 @@ export function useActualisation(quandFini: () => void, tacheInitiale?: Tache | 
     try {
       const t = await appeler<Tache>("/api/actualiser", { method: "POST" });
       setTache(t);
-      suivre();
+      if (t.en_cours) suivre();
+      else rappel.current();   // rien à suivre (en ligne : mise à jour automatique) -> on recharge
     } catch (e) {
       setTache({
         en_cours: false, etape: null, debut: null, fin: null,

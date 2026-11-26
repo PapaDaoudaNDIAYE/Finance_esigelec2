@@ -1,0 +1,5 @@
+# Dépendances pour travailler en local : production + serveur + tests.
+-r requirements.txt
+uvicorn[standard]       # serveur local : uvicorn api:app --reload
+pytest                  # tests : pytest tests/
+httpx                   # client de test de FastAPI

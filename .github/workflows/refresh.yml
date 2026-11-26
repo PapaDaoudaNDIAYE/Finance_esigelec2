@@ -1,0 +1,48 @@
+# Mise à jour des données du site en ligne (Vercel + PostgreSQL), toutes les 15 minutes.
+#
+# GitHub appelle la route /api/refresh du site ; c'est le site lui-même qui récupère les cours,
+# les actualités, et recalcule les conseils (voir api.py). Les crons de Vercel (offre gratuite)
+# ne tournent qu'une fois par jour : c'est pourquoi l'appel part d'ici.
+#
+# Horaires en UTC : 07:00 à 16:45, du lundi au vendredi. Cela couvre la séance de 9 h à 17 h 30,
+# heure de Paris, en hiver (UTC+1) comme en été (UTC+2). Hors séance, la route ne fait rien.
+# GitHub peut retarder une exécution planifiée de quelques minutes.
+#
+# Secrets à créer (Settings → Secrets and variables → Actions) :
+#   APP_URL         adresse du site, ex. https://conseiller-bourse.vercel.app (sans / final)
+#   REFRESH_SECRET  la même valeur que la variable REFRESH_SECRET de Vercel
+#
+# Lancement à la main : onglet Actions → « Rafraîchir le site » → Run workflow
+# (la mise à jour est alors forcée, même marché fermé).
+
+name: Rafraîchir le site
+
+on:
+  schedule:
+    - cron: "*/15 7-16 * * 1-5"
+  workflow_dispatch:
+
+concurrency:
+  group: rafraichir-site
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Appeler /api/refresh
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          REFRESH_SECRET: ${{ secrets.REFRESH_SECRET }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && '?force=1' || '' }}
+        run: |
+          code=$(curl -sS -o reponse.json -w "%{http_code}" --max-time 90 -X POST \
+            -H "Authorization: Bearer ${REFRESH_SECRET}" \
+            "${APP_URL%/}/api/refresh${FORCE}")
+          echo "Code HTTP : $code"
+          cat reponse.json; echo
+          if [ "$code" != "200" ]; then
+            echo "::error::/api/refresh a répondu $code"
+            exit 1
+          fi

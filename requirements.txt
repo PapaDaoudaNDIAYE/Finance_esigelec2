@@ -1,13 +1,11 @@
-# Calcul et données
-pandas
-numpy
-yfinance
-requests
-SQLAlchemy>=2.0
-python-dotenv
-# API web lue par le front-end Next.js (dossier web/)
-fastapi
-uvicorn[standard]
-# Tests
-pytest
-httpx
+# Dépendances de production (installées par Vercel). Pour travailler en local :
+#   pip install -r requirements-dev.txt
+fastapi                 # API web et service du site (api.py)
+SQLAlchemy>=2.0         # accès à la base, SQLite ou PostgreSQL (db.py)
+psycopg[binary]         # pilote PostgreSQL (Neon, Supabase)
+pandas                  # cours et indicateurs techniques
+numpy                   # calculs (risque, Monte-Carlo, indicateurs)
+yfinance                # cours et chiffres financiers (data.py)
+requests                # actualités RSS (data.py) et LLM (module_info.py, API HTTP d'Ollama)
+python-dotenv           # lecture du fichier .env
+tzdata                  # fuseau Europe/Paris si le système n'en fournit pas (zoneinfo)

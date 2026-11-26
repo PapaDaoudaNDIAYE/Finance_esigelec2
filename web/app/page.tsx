@@ -68,7 +68,7 @@ export default function Accueil() {
             {actions.chargement && !actions.data
               ? Array.from({ length: 5 }, (_, i) => <Squelette key={i} hauteur={248} />)
               : liste.map((a, i) => (
-                  <Link key={a.ticker} href={`/action/${encodeURIComponent(a.ticker)}`}
+                  <Link key={a.ticker} href={`/action/${a.ticker}/`}
                     className={`card carte-action s-${classeSignal(a.signal)}`} style={{ animationDelay: `${i * 60}ms` }}>
                     <div className="carte-haut">
                       <Avatar nom={a.nom} signal={a.signal} />

@@ -4,7 +4,6 @@
 // notes des 4 modules, indicateurs techniques, chiffres clés et actualités.
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
 import Entete from "@/components/Entete";
 import Graphique from "@/components/Graphique";
 import Pied from "@/components/Pied";
@@ -31,9 +30,8 @@ const FAMILLES: Record<string, string> = {
 
 const LETTRES = ["A", "B", "C", "D", "E", "F"];
 
-export default function PageAction() {
-  const { ticker } = useParams<{ ticker: string }>();
-  const code = decodeURIComponent(ticker);
+export default function Detail({ ticker }: { ticker: string }) {
+  const code = ticker;
   const etat = useApi<Etat>("/api/etat");
   const detail = useApi<ActionDetail>(`/api/actions/${encodeURIComponent(code)}`);
   const toutRecharger = () => { etat.recharger(); detail.recharger(); };

@@ -30,8 +30,10 @@ CONVENTIONS :
     - les pourcentages sont des fractions : 12 % s'écrit 0.12 ;
     - « cloture » est écrit sans accent (noms de colonnes sans accent = moins de soucis en SQL).
 
-CONNEXION : DATABASE_URL du fichier .env ; par défaut, le fichier SQLite bourse.db à la racine.
-Pour passer à PostgreSQL, il suffit de changer DATABASE_URL (SQLAlchemy fait le reste).
+CONNEXION : DATABASE_URL (variable d'environnement ou fichier .env) ; par défaut, le fichier
+SQLite bourse.db à côté de ce fichier. Pour passer à PostgreSQL (Neon, Supabase...), il suffit
+de mettre son adresse dans DATABASE_URL : « postgres://... » est converti pour le pilote psycopg.
+Toutes les écritures passent par SQLAlchemy et marchent à l'identique sur SQLite et PostgreSQL.
 
 LANCEMENT :
     python db.py      # crée la base (si besoin) et affiche le nombre de lignes par table
@@ -41,10 +43,26 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import (Boolean, Column, Float, MetaData, String, Table, Text, and_,
                         create_engine, delete, func, insert, select)
+
+# Chemins calculés depuis l'emplacement de ce fichier : ils ne dépendent pas du dossier courant.
+DOSSIER = os.path.dirname(os.path.abspath(__file__))
+BASE_LOCALE = os.path.join(DOSSIER, "bourse.db")
+FICHIER_ENV = os.path.join(DOSSIER, ".env")
+SUR_VERCEL = bool(os.getenv("VERCEL"))
+
+
+def charger_env() -> None:
+    """Lit le fichier .env du projet s'il existe (les variables déjà définies sont gardées)."""
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(FICHIER_ENV)
+    except ImportError:
+        pass
 
 # -----------------------------------------------------------------------------
 # 0. LES 5 ACTIONS SUIVIES
@@ -94,10 +112,12 @@ cours = Table(
 actualites = Table(
     "actualites", metadata,
     Column("ticker", String(12), primary_key=True),
-    Column("lien", String(1000), primary_key=True),   # le lien identifie l'article : pas de doublon
+    Column("lien", Text, primary_key=True),           # le lien identifie l'article : pas de doublon
     Column("date", String(16)),                       # « AAAA-MM-JJ HH:MM », heure de Paris
     Column("titre", Text),
-    Column("source", String(200)),                    # journal : Les Echos, Boursorama...
+    Column("source", Text),                           # journal : Les Echos, Boursorama...
+    # (Text et non String(n) : PostgreSQL refuse un texte trop long, SQLite non ;
+    #  les liens Google Actualités dépassent parfois 700 caractères.)
     Column("score_sentiment", Float),                 # -1 à +1, rempli par module_info.py
 )
 
@@ -145,19 +165,47 @@ journal = Table(
 # 2. CONNEXION ET CRÉATION
 # -----------------------------------------------------------------------------
 
+def normaliser_url(url: str) -> str:
+    """Adresse PostgreSQL -> pilote psycopg (version 3), installé par requirements.txt.
+    Neon et Supabase donnent « postgres://... » ou « postgresql://... »."""
+    for prefixe in ("postgres://", "postgresql://"):
+        if url.startswith(prefixe):
+            return "postgresql+psycopg://" + url[len(prefixe):]
+    return url
+
+
+def url_base() -> str:
+    """DATABASE_URL (variable d'environnement ou .env), sinon le fichier bourse.db du projet.
+
+    Sur Vercel sans PostgreSQL : les fichiers du déploiement ne sont pas modifiables, on
+    travaille donc sur une copie de bourse.db dans /tmp (temporaire : mode démonstration).
+    """
+    charger_env()
+    url = normaliser_url(os.getenv("DATABASE_URL") or f"sqlite:///{BASE_LOCALE}")
+    # « sqlite:///bourse.db » (chemin relatif) : relatif au projet, pas au dossier courant.
+    if url.startswith("sqlite:///") and url != "sqlite:///:memory:":
+        chemin = url[len("sqlite:///"):]
+        if not os.path.isabs(chemin) and not chemin.startswith("/"):
+            url = f"sqlite:///{os.path.join(DOSSIER, chemin)}"
+    if SUR_VERCEL and url.startswith("sqlite:///") and not url.startswith("sqlite:////tmp/"):
+        source = url[len("sqlite:///"):]
+        copie = "/tmp/bourse.db"
+        if not os.path.exists(copie) and os.path.exists(source):
+            shutil.copyfile(source, copie)
+        url = f"sqlite:///{copie}"
+    return url
+
+
 def get_engine(url: str | None = None):
     """Connexion à la base.
 
-    url : adresse SQLAlchemy ; si absente, DATABASE_URL du fichier .env,
-          sinon « sqlite:///bourse.db » (fichier dans le dossier courant).
+    url : adresse SQLAlchemy ; si absente, voir url_base().
+    PostgreSQL en serverless (Vercel) : chaque fonction garde au plus 1 connexion ouverte
+    (+2 en renfort), vérifiée avant usage (la base a pu la fermer entre deux appels).
     """
-    if url is None:
-        try:
-            from dotenv import load_dotenv
-            load_dotenv()                   # lit le fichier .env s'il existe
-        except ImportError:
-            pass
-        url = os.getenv("DATABASE_URL", "sqlite:///bourse.db")
+    url = normaliser_url(url) if url else url_base()
+    if url.startswith("postgresql"):
+        return create_engine(url, pool_pre_ping=True, pool_size=1, max_overflow=2)
     return create_engine(url)
 
 
@@ -172,19 +220,47 @@ def creer_base(engine=None):
 
 
 def _remplacer(engine, table, lignes: list[dict], cles: list[str]) -> int:
-    """Écrit des lignes en remplaçant celles qui ont la même clé (« upsert » simple).
+    """Écrit des lignes en remplaçant celles qui ont la même clé (« upsert »).
 
-    Pour chaque ligne : on supprime l'ancienne version (mêmes valeurs dans les colonnes
-    « cles »), puis on insère la nouvelle. Tout se fait dans UNE transaction : si une
-    erreur survient au milieu, rien n'est modifié (la base reste cohérente).
+    Résultat identique sur SQLite et PostgreSQL : une seule ligne par clé, la plus récente.
+    1. Méthode rapide : « INSERT ... ON CONFLICT (clé) DO UPDATE » du dialecte (SQLite ou
+       PostgreSQL), toutes les lignes en un seul envoi. Utile pour une base distante.
+    2. Si elle échoue (table créée sans clé primaire, autre base...) : pour chaque ligne,
+       suppression de l'ancienne version puis insertion de la nouvelle.
+    Chaque méthode tourne dans UNE transaction : en cas d'erreur, rien n'est modifié.
     """
     if not lignes:
         return 0
     metadata.create_all(engine, tables=[table])   # au cas où la table n'existe pas encore
     colonnes = set(table.c.keys())
+    lignes = [{k: v for k, v in l.items() if k in colonnes} for l in lignes]   # ignore les colonnes inconnues
+    # Toutes les lignes doivent avoir les mêmes colonnes pour un envoi groupé ; une colonne
+    # absente vaut NULL, exactement comme avec une insertion simple.
+    utilisees = sorted({k for l in lignes for k in l})
+    lignes = [{k: l.get(k) for k in utilisees} for l in lignes]
+    # Dernière version de chaque clé (une clé en double dans un même envoi ferait échouer l'upsert).
+    lignes = list({tuple(l[k] for k in cles): l for l in lignes}.values())
+
+    dialecte = engine.dialect.name
+    if dialecte in ("sqlite", "postgresql"):
+        if dialecte == "sqlite":
+            from sqlalchemy.dialects.sqlite import insert as insert_dialecte
+        else:
+            from sqlalchemy.dialects.postgresql import insert as insert_dialecte
+        requete = insert_dialecte(table)
+        autres = [c for c in utilisees if c not in cles]
+        requete = (requete.on_conflict_do_update(index_elements=cles,
+                                                 set_={c: requete.excluded[c] for c in autres})
+                   if autres else requete.on_conflict_do_nothing(index_elements=cles))
+        try:
+            with engine.begin() as cx:
+                cx.execute(requete, lignes)
+            return len(lignes)
+        except Exception:
+            pass                                   # on passe à la méthode simple ci-dessous
+
     with engine.begin() as cx:
         for ligne in lignes:
-            ligne = {k: v for k, v in ligne.items() if k in colonnes}   # ignore les colonnes inconnues
             cx.execute(delete(table).where(and_(*(table.c[k] == ligne[k] for k in cles))))
             cx.execute(insert(table).values(**ligne))
     return len(lignes)

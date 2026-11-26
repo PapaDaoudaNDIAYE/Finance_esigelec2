@@ -65,12 +65,9 @@ ALIAS_MODULES = {"info": "information", "information": "information", "technique
 
 
 def nom_client() -> str:
-    """Nom du client affiché dans la phrase : NOM_CLIENT du fichier .env."""
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
-    except ImportError:
-        pass
+    """Nom du client affiché dans la phrase : NOM_CLIENT (variable d'environnement ou .env)."""
+    import db
+    db.charger_env()
     return os.getenv("NOM_CLIENT", "Monsieur Dupont")
 
 
@@ -245,14 +242,26 @@ def calculer_notes(engine, ticker: str) -> None:
     mf.enregistrer_score(engine, mf.analyser_risque(ticker, engine), "risque")
 
 
+def calculer_conseil(engine, ticker: str, client: str | None = None) -> dict:
+    """Notes des 4 modules puis conseil d'UNE action, enregistrés en base. Renvoie le conseil."""
+    calculer_notes(engine, ticker)
+    conseil = decider(ticker, lire_notes(engine, ticker), client or nom_client())
+    enregistrer_conseil(engine, conseil)
+    return conseil
+
+
+def calculer_conseils(engine=None, tickers: list[str] | None = None) -> list[dict]:
+    """Notes des modules puis conseils des actions (par défaut les 5). Utilisé par main()
+    et par la route /api/refresh de api.py."""
+    engine = engine or mf.moteur()
+    client = nom_client()
+    return [calculer_conseil(engine, ticker, client) for ticker in (tickers or mf.TICKERS)]
+
+
 def main() -> None:
     """Étape 2 du lancement (README) : notes des modules puis conseils des 5 actions."""
-    engine = mf.moteur()
-    client = nom_client()
-    for ticker in mf.TICKERS:
-        calculer_notes(engine, ticker)
-        conseil = decider(ticker, lire_notes(engine, ticker), client)
-        enregistrer_conseil(engine, conseil)
+    for conseil in calculer_conseils():
+        ticker = conseil["action"]
         score = "—" if conseil["score_final"] is None else f"{conseil['score_final']:+.2f}"
         print(f"{ticker:7s} {conseil['signal']:14s} score {score}\n        {conseil['phrase']}")
 

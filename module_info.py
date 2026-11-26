@@ -58,14 +58,16 @@ derniere_methode = "aucune"
 
 
 def reglages_llm() -> dict:
-    """Lit les réglages du LLM dans le fichier .env (valeurs par défaut sinon)."""
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
-    except ImportError:
-        pass
+    """Lit les réglages du LLM (variables d'environnement ou .env ; valeurs par défaut sinon).
+
+    LLM_API_KEY : clé envoyée en « Authorization: Bearer ... ». Inutile pour Ollama sur
+    l'ordinateur ; nécessaire pour un service Ollama hébergé (ex. LLM_URL=https://ollama.com),
+    seule façon d'utiliser le LLM depuis Vercel, où Ollama ne peut pas être installé.
+    """
+    db.charger_env()
     return {"url": os.getenv("LLM_URL", "http://localhost:11434").rstrip("/"),
             "modele": os.getenv("LLM_MODELE", "qwen2.5:7b"),
+            "cle": os.getenv("LLM_API_KEY") or None,
             "actif": os.getenv("LLM_ACTIF", "oui").lower() not in ("non", "0", "false")}
 
 
@@ -128,7 +130,8 @@ def appeler_ollama(messages: list[dict], reglages: dict) -> str:
     """
     import requests
     try:
-        reponse = requests.post(f"{reglages['url']}/api/chat", timeout=DELAI_LLM, json={
+        entetes = {"Authorization": f"Bearer {reglages['cle']}"} if reglages.get("cle") else {}
+        reponse = requests.post(f"{reglages['url']}/api/chat", timeout=DELAI_LLM, headers=entetes, json={
             "model": reglages["modele"], "messages": messages, "stream": False,
             "format": SCHEMA_REPONSE, "options": {"temperature": 0}})
     except requests.RequestException as e:

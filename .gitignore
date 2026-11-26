@@ -1,9 +1,13 @@
 # Réglages personnels et secrets : ne jamais publier
 .env
-# bourse.db n'est PAS ignoré : la tâche planifiée GitHub le met à jour et le publie
-# pour que le site puisse le lire (voir .github/workflows/mise-a-jour.yml).
+# Base SQLite locale. Remarque : bourse.db est déjà suivi par git (la tâche
+# .github/workflows/mise-a-jour.yml le publie) ; cette ligne n'empêche donc que l'ajout
+# accidentel d'une autre copie. En ligne, les données sont dans PostgreSQL (DATABASE_URL).
+bourse.db
 # Fichiers générés par Python
 __pycache__/
 *.pyc
 .pytest_cache/
 .venv/
+# Vercel
+.vercel
