@@ -173,6 +173,12 @@ ordres = Table(
     Column("signal", String(20)),                     # conseil du moment (ACHETER, VENDRE...)
 )
 
+reglages = Table(
+    "reglages", metadata,                             # choix du client, ex. niveau = « debutant »
+    Column("cle", String(40), primary_key=True),
+    Column("valeur", Text),
+)
+
 
 # -----------------------------------------------------------------------------
 # 2. CONNEXION ET CRÉATION
@@ -389,6 +395,15 @@ def enregistrer_conseil(engine, conseil: dict, jour: str | None = None) -> None:
              "score_final": conseil.get("score_final"), "signal": conseil["signal"],
              "phrase": conseil["phrase"]}
     _remplacer(engine, conseils, [ligne], ["ticker", "date"])
+
+
+def lire_reglage(engine, cle: str) -> str | None:
+    lignes = _lire(engine, select(reglages.c.valeur).where(reglages.c.cle == cle))
+    return lignes[0]["valeur"] if lignes else None
+
+
+def ecrire_reglage(engine, cle: str, valeur: str) -> None:
+    _remplacer(engine, reglages, [{"cle": cle, "valeur": valeur}], ["cle"])
 
 
 def noter_journal(engine, ticker: str, source: str, statut: str, message: str = "") -> None:

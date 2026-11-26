@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, Instrument_Serif } from "next/font/google";
+import { ProfilProvider } from "@/components/Profil";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
@@ -15,7 +16,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="fr" className={`${inter.variable} ${serif.variable}`}>
       <body>
         <div className="fond" aria-hidden />
-        <div className="page">{children}</div>
+        <ProfilProvider>
+          <div className="page">{children}</div>
+        </ProfilProvider>
       </body>
     </html>
   );

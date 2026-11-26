@@ -168,7 +168,32 @@ export interface Portefeuille {
   ordres: Ordre[];
 }
 
+export type CodeNiveau = "debutant" | "moyen" | "professionnel";
+type Regle = "interdit" | "alerte" | "libre";
+
+export interface RegleNiveau {
+  nom: string;
+  montant_max: number | null;
+  montant_alerte: number | null;
+  part_max: number | null;
+  part_alerte: number | null;
+  achat_contre_conseil: Regle;
+  vente_contre_conseil: Regle;
+}
+
+export interface Profil {
+  niveau: CodeNiveau | null;
+  niveaux: Record<CodeNiveau, RegleNiveau>;
+}
+
 export class ErreurApi extends Error {}
+
+/** L'ordre est risqué pour le niveau du client : rien n'a été exécuté, il doit confirmer. */
+export class ErreurConfirmation extends ErreurApi {
+  constructor(public alertes: string[]) {
+    super("Confirmation requise");
+  }
+}
 
 // Les données sont gardées 20 s par le CDN de Vercel. Après « Actualiser », on ajoute ?v=...
 // aux lectures de cet onglet pour obtenir tout de suite la copie neuve.
@@ -193,6 +218,10 @@ export async function appeler<T>(chemin: string, options?: RequestInit): Promise
     clearTimeout(minuteur);
   }
   if (!reponse.ok) {
+    if (reponse.status === 409) {
+      const corps = await reponse.json().catch(() => null);
+      throw new ErreurConfirmation(Array.isArray(corps?.alertes) ? corps.alertes : []);
+    }
     if (reponse.status === 400) {
       // Refus expliqué par l'API (ex. ordre impossible) : on affiche son message tel quel.
       const corps = await reponse.json().catch(() => null);
@@ -299,11 +328,18 @@ export function useActualisation(quandFini: () => void, tacheInitiale?: Tache | 
 }
 
 /** Envoie un ordre d'achat ou de vente (portefeuille simulé). */
-export const envoyerOrdre = (ticker: string, sens: "achat" | "vente", quantite: number) =>
+export const envoyerOrdre = (ticker: string, sens: "achat" | "vente", quantite: number, confirme = false) =>
   appeler<{ ordre: Ordre; portefeuille: Portefeuille }>("/api/ordres", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ticker, sens, quantite }),
+    body: JSON.stringify({ ticker, sens, quantite, confirme }),
+  });
+
+export const enregistrerNiveau = (niveau: CodeNiveau, risques_acceptes = false) =>
+  appeler<Profil>("/api/profil", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ niveau, risques_acceptes }),
   });
 
 export const reinitialiserPortefeuille = () =>

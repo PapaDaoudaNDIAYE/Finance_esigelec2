@@ -5,11 +5,13 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import Entete from "@/components/Entete";
 import Pied from "@/components/Pied";
+import { phrasesRegles, useProfil } from "@/components/Profil";
 import { Avatar, EtatErreur, SignalBadge, Squelette } from "@/components/ui";
 import {
-  envoyerOrdre, reinitialiserPortefeuille, useApi,
+  ErreurConfirmation, envoyerOrdre, reinitialiserPortefeuille, useApi,
   type ActionOrdre, type Etat, type Portefeuille, type Signal,
 } from "@/lib/api";
 import { classeSignal, dateCourte, euros, libelleSignal, nombre, pourcent } from "@/lib/format";
@@ -239,6 +241,8 @@ function PanneauOrdre({
 }) {
   const [quantite, setQuantite] = useState(1);
   const [envoi, setEnvoi] = useState(false);
+  const [alertes, setAlertes] = useState<string[] | null>(null);    // ordre risqué : à confirmer
+  const { regles, ouvrirChoix } = useProfil();
   const action: ActionOrdre | undefined = p.actions.find((a) => a.ticker === ticker);
   const prix = action?.prix ?? null;
 
@@ -248,8 +252,26 @@ function PanneauOrdre({
   const max = useMemo(() => {
     if (!action || prix == null) return 0;
     if (sens === "vente") return action.detenues;
-    return Math.max(0, Math.floor(p.liquidites / (prix * (1 + p.frais_ordre))));
-  }, [action, prix, sens, p.liquidites, p.frais_ordre]);
+    let m = Math.floor(p.liquidites / (prix * (1 + p.frais_ordre)));
+    if (regles?.montant_max != null) m = Math.min(m, Math.floor(regles.montant_max / prix));   // limite du niveau
+    return Math.max(0, m);
+  }, [action, prix, sens, p.liquidites, p.frais_ordre, regles]);
+
+  // Règles du niveau, vérifiées ici pour prévenir le client ; l'API les applique de toute façon.
+  const dejaInvesti = p.positions.find((x) => x.ticker === ticker)?.valeur ?? 0;
+  const partApres = montant != null && p.valeur_totale ? (dejaInvesti + montant) / p.valeur_totale : 0;
+  const nomNiveau = regles ? `Niveau ${regles.nom}` : "";
+  const limiteNiveau =
+    !regles || !action || montant == null || sens !== "achat" ? null
+    : regles.montant_max != null && montant > regles.montant_max
+      ? `${nomNiveau} : ${euros(regles.montant_max).replace(",00", "")} maximum par achat.`
+    : regles.achat_contre_conseil === "interdit" && action.signal === "VENDRE"
+      ? `${nomNiveau} : achat impossible, notre analyse conseille de vendre ${action.nom}.`
+    : regles.part_max != null && partApres > regles.part_max
+      ? `${nomNiveau} : ${action.nom} dépasserait ${Math.round(regles.part_max * 100)} % de votre portefeuille.`
+    : null;
+  const confirmationPrevue = !!regles && sens === "achat" && montant != null && regles.montant_alerte != null
+    && montant >= regles.montant_alerte;
 
   const probleme =
     !action ? "Choisissez une action."
@@ -257,6 +279,7 @@ function PanneauOrdre({
     : !p.marche_ouvert ? "Marché fermé : les ordres sont acceptés de 9 h à 17 h 30, du lundi au vendredi."
     : sens === "vente" && action.detenues === 0 ? `Vous ne détenez aucune action ${action.nom}.`
     : quantite < 1 ? "Indiquez une quantité."
+    : limiteNiveau ? limiteNiveau
     : quantite > max ? (sens === "achat" ? `Liquidités insuffisantes : ${max} action${max > 1 ? "s" : ""} au maximum.` : `Vous ne détenez que ${max} action${max > 1 ? "s" : ""}.`)
     : null;
 
@@ -265,17 +288,19 @@ function PanneauOrdre({
   const conseilSuivi = action?.signal && (
     (sens === "achat" && action.signal === "ACHETER") || (sens === "vente" && action.signal === "VENDRE"));
 
-  const valider = async () => {
+  const valider = async (confirme = false) => {
     if (!action || probleme) return;
     setEnvoi(true);
     try {
-      const r = await envoyerOrdre(action.ticker, sens, quantite);
+      const r = await envoyerOrdre(action.ticker, sens, quantite, confirme);
       const o = r.ordre;
+      setAlertes(null);
       quandExecute(r.portefeuille,
         `${o.sens === "ACHAT" ? "Achat" : "Vente"} de ${nombre(o.quantite, 0)} ${o.nom} à ${euros(o.prix)} (frais ${euros(o.frais)}).`);
       setQuantite(1);
     } catch (e) {
-      quandRefuse(e instanceof Error ? e.message : "Erreur inconnue.");
+      if (e instanceof ErreurConfirmation) setAlertes(e.alertes);     // rien d'exécuté : on demande
+      else { setAlertes(null); quandRefuse(e instanceof Error ? e.message : "Erreur inconnue."); }
     } finally {
       setEnvoi(false);
     }
@@ -289,6 +314,19 @@ function PanneauOrdre({
           <span className="marche-point" />{p.marche_ouvert ? "Marché ouvert" : "Marché fermé"}
         </span>
       </div>
+
+      {regles && (
+        <div className="bandeau-niveau">
+          <div>
+            <span className="muted petit">Vos garde-fous</span>
+            <b>Niveau {regles.nom}</b>
+          </div>
+          <button className="btn-lien" onClick={ouvrirChoix}>Changer</button>
+          <ul>
+            {phrasesRegles(regles).map((r) => <li key={r.texte} className={`regle-${r.type}`}>{r.texte}</li>)}
+          </ul>
+        </div>
+      )}
 
       <div className="choix-sens" role="tablist">
         <button role="tab" aria-selected={sens === "achat"} className={sens === "achat" ? "actif buy" : ""} onClick={() => setSens("achat")}>Acheter</button>
@@ -328,16 +366,42 @@ function PanneauOrdre({
         <div className={`avis ${conseilContraire ? "avis-contraire" : conseilSuivi ? "avis-suivi" : ""}`}>
           <span className="muted petit">Notre conseil pour {action.nom}</span>
           <SignalBadge signal={action.signal} />
-          {conseilContraire && <p>Cet ordre va à l'encontre de notre analyse. Vous restez libre de le passer.</p>}
+          {conseilContraire && !limiteNiveau && <p>Cet ordre va à l'encontre de notre analyse. Vous restez libre de le passer.</p>}
           {conseilSuivi && <p>Cet ordre suit notre analyse.</p>}
         </div>
       )}
 
-      <button className={`btn btn-ordre ${sens === "achat" ? "buy" : "sell"}`} onClick={valider} disabled={!!probleme || envoi}>
+      {confirmationPrevue && !probleme && (
+        <p className="petit txt-hold">Ordre important pour votre niveau : une confirmation vous sera demandée.</p>
+      )}
+
+      <button className={`btn btn-ordre ${sens === "achat" ? "buy" : "sell"}`} onClick={() => valider(false)} disabled={!!probleme || envoi}>
         {envoi ? "Envoi…" : action ? `${sens === "achat" ? "Acheter" : "Vendre"} ${nombre(quantite, 0)} ${action.nom}` : sens === "achat" ? "Acheter" : "Vendre"}
       </button>
       {probleme && <p className="muted petit probleme">{probleme}</p>}
       <p className="muted petit">Simulation : aucun ordre réel n'est transmis à un courtier.</p>
+
+      {alertes && action && createPortal(
+        <div className="voile" role="alertdialog" aria-modal="true" aria-labelledby="titre-alerte">
+          <div className="fenetre-alerte">
+            <div className="alerte-icone" aria-hidden>!</div>
+            <h3 id="titre-alerte">Cet ordre est risqué pour votre niveau</h3>
+            <p className="muted">
+              {sens === "achat" ? "Achat" : "Vente"} de {nombre(quantite, 0)} {action.nom} pour environ {euros(total)}.
+            </p>
+            <ul className="liste-alertes">
+              {alertes.map((a) => <li key={a}>{a}</li>)}
+            </ul>
+            <div className="fenetre-actions">
+              <button className="btn btn-ghost" onClick={() => setAlertes(null)} disabled={envoi}>Annuler</button>
+              <button className={`btn btn-ordre ${sens === "achat" ? "buy" : "sell"}`} onClick={() => valider(true)} disabled={envoi}>
+                {envoi ? "Envoi…" : "Je confirme l'ordre"}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
     </section>
   );
 }

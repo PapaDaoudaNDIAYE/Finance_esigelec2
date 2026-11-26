@@ -44,3 +44,22 @@ POIDS_TECHNIQUE = {
 # -----------------------------------------------------------------------------
 CAPITAL_DEPART = 500_000   # euros disponibles au départ
 FRAIS_ORDRE = 0.001        # frais de courtage : 0,1 % du montant de chaque ordre
+
+# Niveaux d'investisseur, choisis à l'entrée de l'application (portefeuille.py).
+#   montant_max     : achat le plus gros autorisé, en euros (None : pas de limite)
+#   montant_alerte  : à partir de ce montant, l'achat demande une confirmation
+#   part_max        : part maximale d'une action dans le portefeuille après un achat (None : libre)
+#   part_alerte     : au-delà de cette part, l'achat demande une confirmation
+#   achat_contre_conseil / vente_contre_conseil : « interdit », « alerte » ou « libre »
+#       (acheter une action que nous conseillons de VENDRE, vendre une action notée ACHETER)
+NIVEAUX = {
+    "debutant": {"nom": "Débutant", "montant_max": 50_000, "montant_alerte": 10_000,
+                 "part_max": 0.25, "part_alerte": 0.15,
+                 "achat_contre_conseil": "interdit", "vente_contre_conseil": "alerte"},
+    "moyen": {"nom": "Moyen", "montant_max": 150_000, "montant_alerte": 50_000,
+              "part_max": 0.40, "part_alerte": 0.25,
+              "achat_contre_conseil": "alerte", "vente_contre_conseil": "alerte"},
+    "professionnel": {"nom": "Professionnel", "montant_max": None, "montant_alerte": 200_000,
+                      "part_max": None, "part_alerte": 0.50,
+                      "achat_contre_conseil": "libre", "vente_contre_conseil": "libre"},
+}

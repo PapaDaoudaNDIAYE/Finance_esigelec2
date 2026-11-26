@@ -10,8 +10,11 @@ export const euros = (x: number | null | undefined) => (x == null ? "—" : fmtE
 export const nombre = (x: number | null | undefined, d = 1) => (x == null ? "—" : fmtNombre(d).format(x));
 
 /** 0.0123 -> « +1,23 % » */
-export const pourcent = (x: number | null | undefined, d = 2, signe = true) =>
-  x == null ? "—" : `${signe && x > 0 ? "+" : ""}${fmtNombre(d).format(x * 100)} %`;
+export const pourcent = (x: number | null | undefined, d = 2, signe = true) => {
+  if (x == null) return "—";
+  const v = Math.abs(x * 100) < 0.5 * 10 ** -d ? 0 : x * 100;     // pas de « -0,00 % »
+  return `${signe && v > 0 ? "+" : ""}${fmtNombre(d).format(v)} %`;
+};
 
 /** -0.35 -> « −0,35 » ; 0.274 -> « +0,27 » */
 export const note = (x: number | null | undefined) =>

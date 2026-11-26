@@ -4,6 +4,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useProfil } from "@/components/Profil";
 import { useActualisation, type Etat } from "@/lib/api";
 import { dateHeure } from "@/lib/format";
 
@@ -11,6 +12,7 @@ export default function Entete({ etat, quandActualise }: { etat: Etat | null; qu
   const { tache, lancer, fermer } = useActualisation(quandActualise, etat?.mise_a_jour);
   const enCours = !!tache?.en_cours;
   const surPortefeuille = (usePathname() ?? "").startsWith("/portefeuille");
+  const { profil, regles, ouvrirChoix } = useProfil();
 
   return (
     <>
@@ -30,6 +32,16 @@ export default function Entete({ etat, quandActualise }: { etat: Etat | null; qu
         </nav>
 
         <div className="entete-droite">
+          {profil?.niveau && regles && (
+            <button className={`badge-niveau niveau-${profil.niveau}`} onClick={ouvrirChoix} title="Changer de niveau">
+              <span className="niveau-jauge" aria-hidden>
+                {[0, 1, 2].map((b) => (
+                  <span key={b} className={b <= ["debutant", "moyen", "professionnel"].indexOf(profil.niveau!) ? "plein" : ""} />
+                ))}
+              </span>
+              {regles.nom}
+            </button>
+          )}
           {etat && (
             <span className={`marche ${etat.marche_ouvert ? "ouvert" : "ferme"}`}>
               <span className="marche-point" />

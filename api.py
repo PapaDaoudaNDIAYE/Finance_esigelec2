@@ -23,7 +23,9 @@ ROUTES :
     GET       /api/actualiser         avancement de la mise à jour en cours
     GET/POST  /api/refresh            mise à jour complète (en-tête Authorization: Bearer <secret>)
     GET       /api/portefeuille       portefeuille simulé : liquidités, positions, ordres passés
-    POST      /api/ordres             acheter / vendre {"ticker", "sens": "achat"|"vente", "quantite"}
+    POST      /api/ordres             acheter / vendre {"ticker", "sens": "achat"|"vente", "quantite",
+                                      "confirme"} ; 409 + avertissements si l'ordre est risqué
+    GET/POST  /api/profil             niveau d'investisseur (debutant, moyen, professionnel)
     POST      /api/portefeuille/reinitialiser   efface les ordres (retour au capital de départ)
     /                                 le site (fichiers de web/out/, créés par « npm run build »)
 
@@ -69,7 +71,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000", "http
 CACHE_FICHIERS_VERSIONNES = "public, max-age=31536000, immutable"     # /_next/static : nom = empreinte
 CACHE_PAGES = "public, max-age=0, must-revalidate, s-maxage=86400"     # HTML : toujours revérifié
 CACHE_DONNEES = "public, max-age=0, s-maxage=20, stale-while-revalidate=600"
-ROUTES_SANS_CACHE = ("/api/actualiser", "/api/refresh", "/api/portefeuille", "/api/ordres")
+ROUTES_SANS_CACHE = ("/api/actualiser", "/api/refresh", "/api/portefeuille", "/api/ordres", "/api/profil")
 
 
 @app.middleware("http")
@@ -410,6 +412,27 @@ class DemandeOrdre(BaseModel):
     ticker: str
     sens: str            # « achat » ou « vente »
     quantite: int
+    confirme: bool = False   # le client a lu et accepté les avertissements de son niveau
+
+
+class DemandeNiveau(BaseModel):
+    niveau: str              # debutant, moyen ou professionnel
+    risques_acceptes: bool = False
+
+
+@app.get("/api/profil")
+def lire_profil():
+    """Niveau d'investisseur choisi (None : pas encore choisi) et règles de chaque niveau."""
+    return portefeuille.profil(ENGINE)
+
+
+@app.post("/api/profil")
+def changer_niveau(demande: DemandeNiveau):
+    try:
+        portefeuille.choisir_niveau(ENGINE, demande.niveau, demande.risques_acceptes)
+    except portefeuille.OrdreRefuse as e:
+        return JSONResponse({"detail": str(e)}, status_code=400)
+    return portefeuille.profil(ENGINE)
 
 
 @app.get("/api/portefeuille")
@@ -420,9 +443,14 @@ def lire_portefeuille():
 @app.post("/api/ordres")
 def passer_ordre(demande: DemandeOrdre):
     try:
-        ordre = portefeuille.passer_ordre(ENGINE, demande.ticker, demande.sens, demande.quantite)
+        ordre = portefeuille.passer_ordre(ENGINE, demande.ticker, demande.sens, demande.quantite,
+                                          confirme=demande.confirme)
     except portefeuille.OrdreRefuse as e:
         return JSONResponse({"detail": str(e)}, status_code=400)
+    except portefeuille.OrdreAConfirmer as e:
+        # 409 : rien n'est exécuté ; le site affiche les avertissements et renvoie l'ordre
+        # avec "confirme": true si le client accepte.
+        return JSONResponse({"detail": "confirmation requise", "alertes": e.alertes}, status_code=409)
     return propre({"ordre": ordre, "portefeuille": portefeuille.etat(ENGINE)})
 
 

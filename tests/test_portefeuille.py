@@ -75,6 +75,7 @@ def engine():
     db.creer_base(e)
     db.enregistrer_cours(e, "AI.PA", [{"date": "2026-11-26", "ouverture": 99, "haut": 101, "bas": 98,
                                        "cloture": 100.0, "volume": 1000}])
+    pf.choisir_niveau(e, "professionnel", risques_acceptes=True)   # pas de limite gênante ici
     return e
 
 
@@ -122,6 +123,7 @@ def test_routes_portefeuille(monkeypatch):
     from fastapi.testclient import TestClient
     client = TestClient(api.app)
     client.post("/api/portefeuille/reinitialiser")
+    client.post("/api/profil", json={"niveau": "professionnel", "risques_acceptes": True})
     db.enregistrer_cours(api.ENGINE, "AI.PA", [{"date": "2099-01-01", "ouverture": 50, "haut": 50, "bas": 50,
                                                 "cloture": 50.0, "volume": 1}])
     monkeypatch.setattr(pf.data, "marche_ouvert", lambda moment=None: True)
@@ -140,3 +142,103 @@ def test_routes_portefeuille(monkeypatch):
     r = client.post("/api/ordres", json={"ticker": "AI.PA", "sens": "achat", "quantite": 1})
     assert r.status_code == 400 and "Marché fermé" in r.json()["detail"]
     assert client.post("/api/portefeuille/reinitialiser").json()["ordres"] == []
+
+
+# ---------------------------------------------------------------- niveaux d'investisseur
+
+def etat_vide(capital=500_000):
+    return pf.calculer([], {}, capital=capital)
+
+
+def test_debutant_bloque_au_dela_de_50_000():
+    bloque, _ = pf.controler_niveau(etat_vide(), "debutant", "AI.PA", "ACHAT", 1000, 100.0, None)   # 100 000 €
+    assert bloque and "ne peut pas dépasser 50 000,00 €" in bloque
+
+
+def test_debutant_alerte_a_partir_de_10_000():
+    bloque, alertes = pf.controler_niveau(etat_vide(), "debutant", "AI.PA", "ACHAT", 150, 100.0, None)  # 15 000 €
+    assert bloque is None and any("Ordre important" in a for a in alertes)
+    bloque, alertes = pf.controler_niveau(etat_vide(), "debutant", "AI.PA", "ACHAT", 50, 100.0, None)   # 5 000 €
+    assert bloque is None and alertes == []
+
+
+def test_debutant_ne_peut_pas_acheter_contre_le_conseil():
+    bloque, _ = pf.controler_niveau(etat_vide(), "debutant", "AI.PA", "ACHAT", 1, 100.0, "VENDRE")
+    assert bloque and "VENDRE" in bloque
+    bloque, alertes = pf.controler_niveau(etat_vide(), "moyen", "AI.PA", "ACHAT", 1, 100.0, "VENDRE")
+    assert bloque is None and any("Contre notre conseil" in a for a in alertes)
+    assert pf.controler_niveau(etat_vide(), "professionnel", "AI.PA", "ACHAT", 1, 100.0, "VENDRE") == (None, [])
+
+
+def test_concentration_par_niveau():
+    etat = etat_vide(capital=100_000)
+    # 30 000 € sur une seule action = 30 % : interdit en débutant (25 %), alerte en moyen (> 25 %)
+    assert pf.controler_niveau(etat, "debutant", "AI.PA", "ACHAT", 300, 100.0, None)[0]
+    bloque, alertes = pf.controler_niveau(etat, "moyen", "AI.PA", "ACHAT", 300, 100.0, None)
+    assert bloque is None and any("Concentration" in a for a in alertes)
+
+
+def test_les_ventes_ne_sont_jamais_bloquees_par_le_niveau():
+    etat = pf.calculer([o("ACHAT", 2000, 100, id=1)], {"AI.PA": 100})
+    bloque, alertes = pf.controler_niveau(etat, "debutant", "AI.PA", "VENTE", 2000, 100.0, None)   # 200 000 €
+    assert bloque is None and alertes == []
+    bloque, alertes = pf.controler_niveau(etat, "debutant", "AI.PA", "VENTE", 1, 100.0, "ACHETER")
+    assert bloque is None and any("ACHETER" in a for a in alertes)
+
+
+def test_professionnel_sans_limite_de_montant_mais_alerte():
+    bloque, alertes = pf.controler_niveau(etat_vide(), "professionnel", "AI.PA", "ACHAT", 2500, 100.0, None)
+    assert bloque is None and any("Ordre important" in a for a in alertes)        # 250 000 €
+
+
+def test_choisir_niveau(engine):
+    with pytest.raises(pf.OrdreRefuse, match="risques"):
+        pf.choisir_niveau(engine, "professionnel")
+    with pytest.raises(pf.OrdreRefuse, match="inconnu"):
+        pf.choisir_niveau(engine, "expert")
+    pf.choisir_niveau(engine, "debutant")
+    assert pf.lire_niveau(engine) == "debutant" and pf.profil(engine)["niveau"] == "debutant"
+
+
+def test_ordre_refuse_sans_niveau():
+    e = db.get_engine(f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'n.db')}")
+    db.creer_base(e)
+    db.enregistrer_cours(e, "AI.PA", [{"date": "2026-11-26", "cloture": 100.0}])
+    with pytest.raises(pf.OrdreRefuse, match="niveau"):
+        pf.passer_ordre(e, "AI.PA", "achat", 1, moment=SEANCE)
+
+
+def test_ordre_risque_demande_confirmation(engine):
+    pf.choisir_niveau(engine, "debutant")
+    with pytest.raises(pf.OrdreAConfirmer) as erreur:
+        pf.passer_ordre(engine, "AI.PA", "achat", 150, moment=SEANCE)          # 15 000 €
+    assert any("Ordre important" in a for a in erreur.value.alertes)
+    assert pf.etat(engine)["ordres"] == []                                       # rien d'exécuté
+    ordre = pf.passer_ordre(engine, "AI.PA", "achat", 150, moment=SEANCE, confirme=True)
+    assert ordre["quantite"] == 150
+    with pytest.raises(pf.OrdreRefuse, match="50 000"):
+        pf.passer_ordre(engine, "AI.PA", "achat", 1000, moment=SEANCE, confirme=True)   # même confirmé
+
+
+def test_routes_niveau_et_confirmation(monkeypatch):
+    import api
+    from fastapi.testclient import TestClient
+    client = TestClient(api.app)
+    client.post("/api/portefeuille/reinitialiser")
+    db.enregistrer_cours(api.ENGINE, "AI.PA", [{"date": "2099-01-01", "cloture": 50.0}])
+    monkeypatch.setattr(pf.data, "marche_ouvert", lambda moment=None: True)
+
+    r = client.post("/api/profil", json={"niveau": "professionnel"})
+    assert r.status_code == 400 and "risques" in r.json()["detail"]
+    r = client.post("/api/profil", json={"niveau": "debutant"})
+    assert r.status_code == 200 and r.json()["niveau"] == "debutant"
+    assert client.get("/api/profil").headers["cache-control"] == "no-store"
+
+    ordre = {"ticker": "AI.PA", "sens": "achat", "quantite": 300}                  # 15 000 €
+    r = client.post("/api/ordres", json=ordre)
+    assert r.status_code == 409 and r.json()["alertes"]
+    r = client.post("/api/ordres", json={**ordre, "confirme": True})
+    assert r.status_code == 200
+    r = client.post("/api/ordres", json={**ordre, "quantite": 2000, "confirme": True})   # 100 000 €
+    assert r.status_code == 400 and "50 000" in r.json()["detail"]
+    client.post("/api/portefeuille/reinitialiser")
