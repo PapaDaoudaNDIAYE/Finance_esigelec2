@@ -51,7 +51,7 @@ export default function Entete({ etat, quandActualise }: { etat: Etat | null; qu
             <strong>
               {tache.erreur ? "Mise à jour impossible" : tache.en_cours ? "Mise à jour en cours" : "Données à jour"}
             </strong>
-            <span>{tache.erreur ?? (tache.en_cours || (tache.etape && tache.etape !== "Terminé") ? tache.etape : "Les conseils ont été recalculés.")}</span>
+            <span>{tache.erreur ?? (tache.en_cours ? tache.etape : "Les conseils ont été recalculés.")}</span>
           </div>
           {!tache.en_cours && <button className="toast-fermer" onClick={fermer} aria-label="Fermer">×</button>}
         </div>

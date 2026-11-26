@@ -150,7 +150,7 @@ export function EtatErreur({ message, onReessayer }: { message: string; onReessa
       <div>
         <h3>Données momentanément indisponibles</h3>
         <p>{message}</p>
-        <p className="muted petit">Lancez l'API avec <code>uvicorn serveur:app --port 8000</code> à la racine du projet.</p>
+        <p className="muted petit">Lancez l'API avec <code>uvicorn api:app --port 8000</code> à la racine du projet.</p>
       </div>
       {onReessayer && <button className="btn btn-ghost" onClick={onReessayer}>Réessayer</button>}
     </div>

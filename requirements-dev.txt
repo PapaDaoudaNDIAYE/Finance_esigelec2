@@ -1,7 +1,0 @@
-# Tout ce qu'il faut pour travailler en local : API + mise à jour des données + tests.
-#   pip install -r requirements-dev.txt
--r requirements.txt
-yfinance
-uvicorn[standard]
-pytest
-httpx

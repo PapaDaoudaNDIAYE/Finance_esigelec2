@@ -34,8 +34,8 @@ const LETTRES = ["A", "B", "C", "D", "E", "F"];
 export default function PageAction() {
   const { ticker } = useParams<{ ticker: string }>();
   const code = decodeURIComponent(ticker);
-  const etat = useApi<Etat>("/api/py/etat");
-  const detail = useApi<ActionDetail>(`/api/py/actions/${encodeURIComponent(code)}`);
+  const etat = useApi<Etat>("/api/etat");
+  const detail = useApi<ActionDetail>(`/api/actions/${encodeURIComponent(code)}`);
   const toutRecharger = () => { etat.recharger(); detail.recharger(); };
   const a = detail.data;
   const seuils = etat.data?.seuils ?? { achat: 0.3, vente: -0.3 };
