@@ -36,6 +36,7 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import os
+import threading
 
 import db
 
@@ -75,8 +76,18 @@ def _yfinance():
     cookies) y est donc rangé, sinon il essaierait d'écrire dans le dossier de l'utilisateur."""
     import yfinance
     if os.getenv("VERCEL"):
-        yfinance.set_tz_cache_location("/tmp/yf-cache")
+        # Une seule fois par processus, et dossier créé d'avance : sur Vercel, plusieurs
+        # actions sont traitées en parallèle et yfinance échouait à créer le même dossier deux fois.
+        with _VERROU_YF:
+            if not _YF_REGLE:
+                os.makedirs("/tmp/yf-cache", exist_ok=True)
+                yfinance.set_tz_cache_location("/tmp/yf-cache")
+                _YF_REGLE.append(True)
     return yfinance
+
+
+_VERROU_YF = threading.Lock()
+_YF_REGLE: list = []
 
 
 # -----------------------------------------------------------------------------
