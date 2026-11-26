@@ -41,7 +41,7 @@ from datetime import datetime, time as heure
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import data
@@ -401,6 +401,17 @@ def refresh(request: Request, force: bool = False):
 # -----------------------------------------------------------------------------
 # web/out/ contient le site Next.js exporté (« npm run build » dans web/).
 # html=True : « /action/AI.PA/ » sert web/out/action/AI.PA/index.html.
+
+@app.get("/action/{ticker}.txt", include_in_schema=False)
+def donnees_page_action(ticker: str):
+    """Next.js prend « .PA » de « AI.PA » pour une extension de fichier : pour préparer la page
+    d'une action, il demande /action/AI.PA.txt au lieu de /action/AI.PA/index.txt (fichier
+    réellement exporté). Sans cette route : erreur 404, puis « Application error » au clic."""
+    fichier = os.path.join(DOSSIER_SITE, "action", ticker, "index.txt")
+    if ticker not in db.TICKERS or not os.path.isfile(fichier):
+        raise HTTPException(404, "page inconnue")
+    return FileResponse(fichier, media_type="text/x-component")
+
 
 if os.path.isdir(DOSSIER_SITE):
     app.mount("/", StaticFiles(directory=DOSSIER_SITE, html=True), name="web")

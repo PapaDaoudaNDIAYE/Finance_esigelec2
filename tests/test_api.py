@@ -205,3 +205,13 @@ def test_regles_de_cache():
         js = next(f for f in os.listdir(os.path.join(api.DOSSIER_SITE, "_next", "static", "chunks"))
                   if f.endswith(".js"))
         assert "immutable" in client.get(f"/_next/static/chunks/{js}").headers["cache-control"]
+
+
+def test_donnees_page_action_pour_next():
+    """/action/AI.PA.txt (demandé par Next.js à cause du point dans « AI.PA ») est servi."""
+    if os.path.isdir(api.DOSSIER_SITE):
+        r = client.get("/action/AI.PA.txt?_rsc=abc")
+        assert r.status_code == 200 and r.text == open(
+            os.path.join(api.DOSSIER_SITE, "action", "AI.PA", "index.txt"), encoding="utf-8").read()
+    assert client.get("/action/..%2Fsecret.txt").status_code == 404
+    assert client.get("/action/INCONNU.txt").status_code == 404
