@@ -1,3 +1,18 @@
-# Point d'entrée de l'application pour Vercel : l'objet FastAPI « app » du fichier api.py.
+[project]
+name = "finance-esigelec2"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "SQLAlchemy>=2.0",
+    "psycopg[binary]",
+    "pandas",
+    "numpy",
+    "yfinance",
+    "requests",
+    "python-dotenv",
+    "tzdata",
+]
+
 [tool.vercel]
 entrypoint = "api:app"
