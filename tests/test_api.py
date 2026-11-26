@@ -192,3 +192,16 @@ def test_rafraichir_rend_la_main_a_temps(monkeypatch):
     assert _t.monotonic() - debut < 2.5
     assert "TTE.PA" not in [m["action"] for m in r["maj"]] and len(r["maj"]) == 4
     assert any(e["action"] == "TTE.PA" and e["etape"] == "délai" for e in r["erreurs"])
+
+
+def test_regles_de_cache():
+    """Navigateurs et CDN de Vercel : règles explicites, jamais de cache sur les mises à jour."""
+    assert "s-maxage=20" in client.get("/api/actions").headers["cache-control"]
+    assert client.get("/api/actualiser").headers["cache-control"] == "no-store"
+    assert client.get("/api/refresh").headers["cache-control"] == "no-store"          # 401
+    assert client.get("/api/actions/INCONNU").headers["cache-control"] == "no-store"  # 404
+    if os.path.isdir(api.DOSSIER_SITE):
+        assert "must-revalidate" in client.get("/").headers["cache-control"]
+        js = next(f for f in os.listdir(os.path.join(api.DOSSIER_SITE, "_next", "static", "chunks"))
+                  if f.endswith(".js"))
+        assert "immutable" in client.get(f"/_next/static/chunks/{js}").headers["cache-control"]

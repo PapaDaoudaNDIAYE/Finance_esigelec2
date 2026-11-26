@@ -55,6 +55,34 @@ app = FastAPI(title="Conseiller Bourse", version="1.1")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
                    allow_methods=["*"], allow_headers=["*"])
 
+
+
+# Règles de cache, lues par les navigateurs ET par le CDN de Vercel (« s-maxage »). Sans elles,
+# chaque navigateur décide seul (une ancienne page peut rester affichée après un déploiement)
+# et chaque fichier du site repasse par Python. Le CDN de Vercel est vidé à chaque déploiement.
+CACHE_FICHIERS_VERSIONNES = "public, max-age=31536000, immutable"     # /_next/static : nom = empreinte
+CACHE_PAGES = "public, max-age=0, must-revalidate, s-maxage=86400"     # HTML : toujours revérifié
+CACHE_DONNEES = "public, max-age=0, s-maxage=20, stale-while-revalidate=600"
+ROUTES_SANS_CACHE = ("/api/actualiser", "/api/refresh")
+
+
+@app.middleware("http")
+async def regles_de_cache(request: Request, suite):
+    reponse = await suite(request)
+    chemin = request.url.path
+    if request.method != "GET" or reponse.status_code != 200 or chemin.startswith(ROUTES_SANS_CACHE):
+        reponse.headers["Cache-Control"] = "no-store"
+    elif chemin.startswith("/_next/static/"):
+        reponse.headers["Cache-Control"] = CACHE_FICHIERS_VERSIONNES
+    elif chemin.startswith("/api/"):
+        # Données : servies tout de suite par le CDN (au plus 20 s, puis rafraîchies en
+        # arrière-plan). Après « Actualiser », le site redemande avec ?v=... (copie neuve).
+        reponse.headers["Cache-Control"] = CACHE_DONNEES
+    else:
+        reponse.headers["Cache-Control"] = CACHE_PAGES
+    return reponse
+
+
 ENGINE = db.creer_base(db.get_engine())
 JOURS_SPARKLINE = 30
 MAX_ACTUALITES = 15

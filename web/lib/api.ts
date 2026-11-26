@@ -118,7 +118,12 @@ export interface ActionDetail extends Omit<ActionResume, "sparkline" | "signal" 
 
 export class ErreurApi extends Error {}
 
+// Les données sont gardées 20 s par le CDN de Vercel. Après « Actualiser », on ajoute ?v=...
+// aux lectures de cet onglet pour obtenir tout de suite la copie neuve.
+let versionDonnees = "";
+
 export async function appeler<T>(chemin: string, options?: RequestInit): Promise<T> {
+  if (versionDonnees && !options?.method) chemin += `${chemin.includes("?") ? "&" : "?"}v=${versionDonnees}`;
   let reponse: Response;
   // Jamais d'attente sans fin : 25 s pour une lecture, 58 s pour une mise à jour (Vercel coupe à 60 s).
   const delai = options?.method === "POST" ? 58000 : 25000;
@@ -194,6 +199,7 @@ export function useActualisation(quandFini: () => void, tacheInitiale?: Tache | 
         const t = await appeler<Tache>("/api/actualiser");
         setTache(t);
         if (!t.en_cours) {
+          versionDonnees = String(Date.now());
           arreter();
           rappel.current();
         }
@@ -220,6 +226,7 @@ export function useActualisation(quandFini: () => void, tacheInitiale?: Tache | 
     setTache({ en_cours: true, etape: "Récupération des cours, chiffres et actualités", debut: null, fin: null, erreur: null });
     try {
       const t = await appeler<Tache>("/api/actualiser", { method: "POST" });
+      versionDonnees = String(Date.now());
       setTache(t);
       if (t.en_cours) suivre();
       else rappel.current();   // déjà terminé (en ligne) -> on recharge les données
