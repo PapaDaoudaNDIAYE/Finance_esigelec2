@@ -57,6 +57,11 @@ def migrer(source_url: str, cible_url: str) -> dict:
         avant = compter(cible, table)
         for i in range(0, len(lignes), PAQUET):
             db._remplacer(cible, table, lignes[i:i + PAQUET], cles)
+        if table.name == "ordres" and cible.dialect.name == "postgresql" and lignes:
+            # identifiants copiés tels quels : on avance le compteur pour les prochains ordres
+            with cible.begin() as cx:
+                cx.exec_driver_sql("SELECT setval(pg_get_serial_sequence('ordres', 'id'), "
+                                   "(SELECT MAX(id) FROM ordres))")
         copie[table.name] = len(lignes)
         print(f"  {table.name:13s} {len(lignes):6d} lignes lues · cible : {avant} -> {compter(cible, table)}")
     return copie

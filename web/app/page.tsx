@@ -6,15 +6,14 @@ import Link from "next/link";
 import Entete from "@/components/Entete";
 import Pied from "@/components/Pied";
 import { Avatar, EtatErreur, ScoreBar, SignalBadge, Sparkline, Squelette, Variation } from "@/components/ui";
-import { useApi, type ActionResume, type Etat } from "@/lib/api";
-import { classeSignal, dateCourte, dateDuJour, euros, note } from "@/lib/format";
-
-const CAPITAL = 500_000;
+import { useApi, type ActionResume, type Etat, type Portefeuille } from "@/lib/api";
+import { classeSignal, dateCourte, dateDuJour, euros, note, pourcent } from "@/lib/format";
 
 export default function Accueil() {
   const etat = useApi<Etat>("/api/etat");
   const actions = useApi<ActionResume[]>("/api/actions");
-  const toutRecharger = () => { etat.recharger(); actions.recharger(); };
+  const pf = useApi<Portefeuille>("/api/portefeuille");
+  const toutRecharger = () => { etat.recharger(); actions.recharger(); pf.recharger(); };
 
   const liste = actions.data ?? [];
   const compte = (s: string) => liste.filter((a) => a.signal === s).length;
@@ -36,10 +35,15 @@ export default function Accueil() {
         </p>
 
         <div className="resume">
-          <div className="resume-carte">
-            <span className="muted petit">Capital suivi</span>
-            <strong>{euros(CAPITAL).replace(",00", "")}</strong>
-          </div>
+          <Link href="/portefeuille/" className="resume-carte lien-portefeuille">
+            <span className="muted petit">Votre portefeuille →</span>
+            <strong>{pf.data ? euros(pf.data.valeur_totale) : "–"}</strong>
+            {pf.data && (
+              <span className={`petit ${pf.data.gain > 0.005 ? "txt-buy" : pf.data.gain < -0.005 ? "txt-sell" : "muted"}`}>
+                {pourcent(pf.data.performance)} depuis le départ
+              </span>
+            )}
+          </Link>
           <div className="resume-carte buy">
             <span className="muted petit">À acheter</span>
             <strong>{actions.data ? compte("ACHETER") : "–"}</strong>

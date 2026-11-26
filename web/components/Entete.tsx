@@ -1,14 +1,16 @@
 "use client";
 
-// Barre du haut : logo, état du marché, dernière mise à jour et bouton « Actualiser » (UC4, UC7).
+// Barre du haut : logo, navigation (Analyses / Portefeuille), état du marché, dernière mise à jour et bouton « Actualiser » (UC4, UC7).
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useActualisation, type Etat } from "@/lib/api";
 import { dateHeure } from "@/lib/format";
 
 export default function Entete({ etat, quandActualise }: { etat: Etat | null; quandActualise: () => void }) {
   const { tache, lancer, fermer } = useActualisation(quandActualise, etat?.mise_a_jour);
   const enCours = !!tache?.en_cours;
+  const surPortefeuille = (usePathname() ?? "").startsWith("/portefeuille");
 
   return (
     <>
@@ -21,6 +23,11 @@ export default function Entete({ etat, quandActualise }: { etat: Etat | null; qu
           </span>
           <span className="logo-texte">Conseiller<b>Bourse</b></span>
         </Link>
+
+        <nav className="nav" aria-label="Navigation principale">
+          <Link href="/" className={surPortefeuille ? "" : "actif"}>Analyses</Link>
+          <Link href="/portefeuille/" className={surPortefeuille ? "actif" : ""}>Portefeuille</Link>
+        </nav>
 
         <div className="entete-droite">
           {etat && (

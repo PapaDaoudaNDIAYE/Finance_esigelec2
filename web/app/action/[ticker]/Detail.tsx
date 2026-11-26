@@ -66,6 +66,10 @@ export default function Detail({ ticker }: { ticker: string }) {
               <span className="prix-grand">{euros(a.dernier)}</span>
               <Variation valeur={a.variation} />
               <span className={`marche-texte ${a.marche_ouvert ? "ouvert" : "ferme"}`}>{a.etat_marche}</span>
+              <div className="actions-ordre">
+                <Link href={`/portefeuille/?action=${a.ticker}&sens=achat`} className="btn-mini buy">Acheter</Link>
+                <Link href={`/portefeuille/?action=${a.ticker}&sens=vente`} className="btn-mini sell">Vendre</Link>
+              </div>
             </div>
           </section>
 

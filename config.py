@@ -38,3 +38,9 @@ POIDS_TECHNIQUE = {
     "bollinger": 0.15,   # bandes de Bollinger 20 jours, 2 écarts-types
     "niveaux": 0.10,     # supports et résistances sur 60 séances
 }
+
+# -----------------------------------------------------------------------------
+# Portefeuille simulé (portefeuille.py) : argent virtuel, aucun ordre réel
+# -----------------------------------------------------------------------------
+CAPITAL_DEPART = 500_000   # euros disponibles au départ
+FRAIS_ORDRE = 0.001        # frais de courtage : 0,1 % du montant de chaque ordre

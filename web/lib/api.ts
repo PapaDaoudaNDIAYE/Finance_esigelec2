@@ -116,6 +116,58 @@ export interface ActionDetail extends Omit<ActionResume, "sparkline" | "signal" 
   sources: SourceEtat[];
 }
 
+export interface Position {
+  ticker: string;
+  nom: string;
+  quantite: number;
+  pru: number;
+  cours: number;
+  valeur: number;
+  plus_value: number;
+  plus_value_pct: number | null;
+  poids: number | null;
+  signal: Signal | null;
+}
+
+export interface Ordre {
+  id: number;
+  date: string;
+  ticker: string;
+  nom: string;
+  sens: "ACHAT" | "VENTE";
+  quantite: number;
+  prix: number;
+  frais: number;
+  montant: number;
+  signal: Signal | null;
+}
+
+export interface ActionOrdre {
+  ticker: string;
+  nom: string;
+  prix: number | null;
+  date: string | null;
+  signal: Signal | null;
+  detenues: number;
+}
+
+export interface Portefeuille {
+  capital_depart: number;
+  liquidites: number;
+  valeur_titres: number;
+  valeur_totale: number;
+  gain: number;
+  performance: number | null;
+  plus_value_latente: number;
+  plus_value_realisee: number;
+  frais_payes: number;
+  frais_ordre: number;
+  marche_ouvert: boolean;
+  positions: Position[];
+  actions: ActionOrdre[];
+  ordres: Ordre[];
+}
+
 export class ErreurApi extends Error {}
 
 // Les données sont gardées 20 s par le CDN de Vercel. Après « Actualiser », on ajoute ?v=...
@@ -141,6 +193,11 @@ export async function appeler<T>(chemin: string, options?: RequestInit): Promise
     clearTimeout(minuteur);
   }
   if (!reponse.ok) {
+    if (reponse.status === 400) {
+      // Refus expliqué par l'API (ex. ordre impossible) : on affiche son message tel quel.
+      const corps = await reponse.json().catch(() => null);
+      throw new ErreurApi(typeof corps?.detail === "string" ? corps.detail : "Demande refusée.");
+    }
     if (reponse.status === 404) throw new ErreurApi("Cette action n'est pas suivie par le conseiller.");
     if (reponse.status === 504)
       throw new ErreurApi("Le serveur a mis trop de temps à répondre. Réessayez dans un instant.");
@@ -177,7 +234,7 @@ export function useApi<T>(chemin: string) {
     recharger();
   }, [recharger]);
 
-  return { data, erreur, chargement, recharger };
+  return { data, erreur, chargement, recharger, remplacer: setData };
 }
 
 /** Bouton « Actualiser » : lance la mise à jour puis suit son avancement toutes les 2 s. */
@@ -240,3 +297,14 @@ export function useActualisation(quandFini: () => void, tacheInitiale?: Tache | 
 
   return { tache, lancer, fermer: () => setTache(null) };
 }
+
+/** Envoie un ordre d'achat ou de vente (portefeuille simulé). */
+export const envoyerOrdre = (ticker: string, sens: "achat" | "vente", quantite: number) =>
+  appeler<{ ordre: Ordre; portefeuille: Portefeuille }>("/api/ordres", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ticker, sens, quantite }),
+  });
+
+export const reinitialiserPortefeuille = () =>
+  appeler<Portefeuille>("/api/portefeuille/reinitialiser", { method: "POST" });

@@ -12,7 +12,8 @@ L'API ne fait que LIRE la base, sauf :
     - /api/actualiser : bouton « Actualiser » du site (en local : en arrière-plan ; sur Vercel :
                         pendant la requête, au plus une fois toutes les 2 minutes) ;
     - /api/refresh    : mise à jour complète protégée par REFRESH_SECRET, appelée toutes les
-                        15 minutes par GitHub Actions (.github/workflows/refresh.yml).
+                        15 minutes par GitHub Actions (.github/workflows/refresh.yml) ;
+    - /api/ordres et /api/portefeuille/reinitialiser : portefeuille simulé (portefeuille.py).
 
 ROUTES :
     GET       /api/etat               nom du client, marché ouvert/fermé, dernière mise à jour
@@ -21,6 +22,9 @@ ROUTES :
     POST      /api/actualiser         relance la mise à jour complète (UC4)
     GET       /api/actualiser         avancement de la mise à jour en cours
     GET/POST  /api/refresh            mise à jour complète (en-tête Authorization: Bearer <secret>)
+    GET       /api/portefeuille       portefeuille simulé : liquidités, positions, ordres passés
+    POST      /api/ordres             acheter / vendre {"ticker", "sens": "achat"|"vente", "quantite"}
+    POST      /api/portefeuille/reinitialiser   efface les ordres (retour au capital de départ)
     /                                 le site (fichiers de web/out/, créés par « npm run build »)
 
 LANCEMENT (local) :
@@ -43,11 +47,13 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 import data
 import db
 import decision
 import module_technique as mt
+import portefeuille
 
 DOSSIER_SITE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "out")
 
@@ -63,7 +69,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000", "http
 CACHE_FICHIERS_VERSIONNES = "public, max-age=31536000, immutable"     # /_next/static : nom = empreinte
 CACHE_PAGES = "public, max-age=0, must-revalidate, s-maxage=86400"     # HTML : toujours revérifié
 CACHE_DONNEES = "public, max-age=0, s-maxage=20, stale-while-revalidate=600"
-ROUTES_SANS_CACHE = ("/api/actualiser", "/api/refresh")
+ROUTES_SANS_CACHE = ("/api/actualiser", "/api/refresh", "/api/portefeuille", "/api/ordres")
 
 
 @app.middleware("http")
@@ -397,7 +403,37 @@ def refresh(request: Request, force: bool = False):
 
 
 # -----------------------------------------------------------------------------
-# 5. LE SITE (déclaré APRÈS toutes les routes /api/ pour ne pas les masquer)
+# 5. PORTEFEUILLE SIMULÉ (argent virtuel, voir portefeuille.py)
+# -----------------------------------------------------------------------------
+
+class DemandeOrdre(BaseModel):
+    ticker: str
+    sens: str            # « achat » ou « vente »
+    quantite: int
+
+
+@app.get("/api/portefeuille")
+def lire_portefeuille():
+    return propre(portefeuille.etat(ENGINE))
+
+
+@app.post("/api/ordres")
+def passer_ordre(demande: DemandeOrdre):
+    try:
+        ordre = portefeuille.passer_ordre(ENGINE, demande.ticker, demande.sens, demande.quantite)
+    except portefeuille.OrdreRefuse as e:
+        return JSONResponse({"detail": str(e)}, status_code=400)
+    return propre({"ordre": ordre, "portefeuille": portefeuille.etat(ENGINE)})
+
+
+@app.post("/api/portefeuille/reinitialiser")
+def reinitialiser_portefeuille():
+    portefeuille.reinitialiser(ENGINE)
+    return propre(portefeuille.etat(ENGINE))
+
+
+# -----------------------------------------------------------------------------
+# 6. LE SITE (déclaré APRÈS toutes les routes /api/ pour ne pas les masquer)
 # -----------------------------------------------------------------------------
 # web/out/ contient le site Next.js exporté (« npm run build » dans web/).
 # html=True : « /action/AI.PA/ » sert web/out/action/AI.PA/index.html.

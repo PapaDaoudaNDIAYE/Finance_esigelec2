@@ -47,7 +47,7 @@ import shutil
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import (Boolean, Column, Float, MetaData, String, Table, Text, and_,
+from sqlalchemy import (Boolean, Column, Float, Integer, MetaData, String, Table, Text, and_,
                         create_engine, delete, event, func, insert, select)
 
 # Chemins calculés depuis l'emplacement de ce fichier : ils ne dépendent pas du dossier courant.
@@ -159,6 +159,18 @@ journal = Table(
     Column("source", String(20), primary_key=True),   # cours, fondamentaux, actualites
     Column("statut", String(10)),                     # ok ou erreur
     Column("message", Text),                          # explication lisible par le client
+)
+
+ordres = Table(
+    "ordres", metadata,                               # portefeuille simulé (portefeuille.py)
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("date", String(19)),                       # « AAAA-MM-JJ HH:MM:SS », heure de Paris
+    Column("ticker", String(12)),
+    Column("sens", String(6)),                        # ACHAT ou VENTE
+    Column("quantite", Integer),
+    Column("prix", Float),                            # cours d'exécution (dernier cours connu)
+    Column("frais", Float),                           # frais de courtage en euros
+    Column("signal", String(20)),                     # conseil du moment (ACHETER, VENDRE...)
 )
 
 

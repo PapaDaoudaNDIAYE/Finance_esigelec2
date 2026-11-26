@@ -50,6 +50,7 @@ L'application analyse **uniquement** ces 5 actions, toutes cotées sur Euronext 
 | UC5 | Sans information récente, le modèle s'appuie principalement sur l'analyse technique |
 | UC6 | Si une source est indisponible : message clair, l'application ne plante pas |
 | UC7 | Si le marché est fermé : affichage du dernier cours connu et de sa date |
+| UC8 | **Portefeuille simulé** (argent virtuel) : acheter et vendre les 5 actions pendant la séance, au dernier cours connu, avec frais de 0,1 % ; positions, plus-values et historique des ordres comparés au conseil du moment |
  
 ---
  
@@ -174,6 +175,7 @@ Finance_esigelec2/
 | `fondamentaux` | ticker, date, per, croissance, marge, dette, dividende |
 | `scores` | ticker, date, module, score, raisons, disponible |
 | `conseils` | ticker, date, score_final, signal, phrase |
+| `ordres` | id, date, ticker, sens (ACHAT/VENTE), quantité, prix, frais, signal du moment — portefeuille simulé (`portefeuille.py`) |
  
 SQLite suffit pour le prototype. Grâce à SQLAlchemy, on peut passer à PostgreSQL en changeant seulement `DATABASE_URL` dans le fichier `.env`.
  
