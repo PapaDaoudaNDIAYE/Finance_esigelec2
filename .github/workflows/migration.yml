@@ -1,7 +1,3 @@
-on:
-  workflow_dispatch:   # permet de le lancer à la main
-  push:
-    branches: [main]   # optionnel : le lance à chaque push sur main
 
 name: Migration SQLite vers Neon
 on: workflow_dispatch
