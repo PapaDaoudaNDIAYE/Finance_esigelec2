@@ -1,0 +1,24 @@
+{
+  "name": "conseiller-bourse-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Front-end Next.js du Conseiller Bourse (lit l'API Python api.py)",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "lightweight-charts": "4.2.3",
+    "next": "15.5.29",
+    "react": "19.2.9",
+    "react-dom": "19.2.9"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "typescript": "5.9.3"
+  }
+}

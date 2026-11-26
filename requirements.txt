@@ -1,9 +1,13 @@
+# Calcul et données
 pandas
 numpy
 yfinance
 requests
 SQLAlchemy>=2.0
 python-dotenv
-pandas-ta
-streamlit
+# API web lue par le front-end Next.js (dossier web/)
+fastapi
+uvicorn[standard]
+# Tests
 pytest
+httpx

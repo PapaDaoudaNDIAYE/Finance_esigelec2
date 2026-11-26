@@ -105,57 +105,57 @@ Tous les modules renvoient exactement cette structure :
 ---
  
 ## Architecture
- 
+
 ```
-  Sources externes                Traitement                     Affichage
- ┌──────────────────┐        ┌──────────────────────┐
- │ yfinance (cours, │        │  module_info.py      │
- │ chiffres)        │──┐     │  module_technique.py │──┐
- │ News RSS         │  │     │  module_financier.py │  │
- └──────────────────┘  │     └──────────────────────┘  │
-                       ▼               ▲   │           ▼
-                  ┌─────────┐          │   │     ┌─────────────┐     ┌──────────┐
-                  │ data.py │──► bourse.db ◄───── │ decision.py │───► │  app.py  │
-                  └─────────┘     (SQLite)        └─────────────┘     │ Streamlit│
-                                                                      └──────────┘
+  Sources externes            Traitement (Python)                    Affichage
+ ┌──────────────────┐     ┌────────────────────────┐
+ │ yfinance (cours, │     │ module_info.py  (LLM)  │
+ │ chiffres)        │──┐  │ module_technique.py    │──┐
+ │ Google Actualités│  │  │ module_financier.py    │  │
+ │ (RSS)            │  │  └────────────────────────┘  │
+ └──────────────────┘  ▼            ▲   │            ▼
+                  ┌─────────┐       │   │      ┌─────────────┐    ┌──────────┐  JSON  ┌──────────────┐
+                  │ data.py │──► bourse.db ◄── │ decision.py │    │  api.py  │──────► │ web/ Next.js │
+                  └─────────┘     (SQLite) ──────────────────────► │ FastAPI  │        │ (port 3000)  │
+                                                                   └──────────┘        └──────────────┘
 ```
- 
-La base de données est le point central : chaque module lit ses données dans la base et y écrit sa note. Le front-end lit uniquement la base.
- 
-**Technologies** : Python 3.11+, pandas, pandas-ta, yfinance, feedparser, SQLAlchemy + SQLite, API LLM, Streamlit, pytest.
- 
+
+La base de données est le point central : chaque module lit ses données dans la base et y écrit sa note.
+L'API (`api.py`) lit la base et la sert en JSON ; le front-end Next.js (`web/`) n'appelle que l'API.
+
+**Technologies** : Python 3.11+, pandas, numpy, yfinance, SQLAlchemy + SQLite, Ollama (LLM open source local),
+FastAPI + Uvicorn, Next.js 15 + React 19 + TypeScript, lightweight-charts (graphiques TradingView), pytest.
+
 ---
- 
+
 ## Structure du projet
- 
+
 ```
-conseiller-bourse/
+Finance_esigelec2/
 ├── README.md
-├── requirements.txt
-├── .env.example            # modèle du fichier de configuration
-├── config.py               # tickers, poids, seuils
-├── db.py                   # schéma et connexion à la base
-├── data.py                 # récupération des cours, chiffres et news
-├── module_info.py          # module Information
-├── module_technique.py     # module Analyse technique
-├── module_financier.py     # modules Financier et Risque
-├── decision.py             # pondération, seuils, phrase finale
-├── app.py                  # interface Streamlit
-├── bourse.db               # base SQLite (générée, non versionnée)
-├── tests/
-│   ├── test_data.py
-│   ├── test_module_info.py
-│   ├── test_module_technique.py
-│   ├── test_module_financier.py
-│   └── test_decision.py
-└── docs/
-    ├── documentation_technique.md
-    ├── rapport_limites.md
-    └── presentation.pdf
+├── requirements.txt          # dépendances Python
+├── .env.example              # modèle du fichier de configuration
+├── config.py                 # tickers, poids, seuils
+├── db.py                     # schéma et connexion à la base
+├── data.py                   # récupération des cours, chiffres et news
+├── module_info.py            # module Information (LLM Ollama + lexique de secours)
+├── module_technique.py       # module Analyse technique
+├── module_financier.py       # modules Financier et Risque
+├── decision.py               # pondération, seuils, phrase finale
+├── api.py                    # API web FastAPI lue par le front-end
+├── bourse.db                 # base SQLite (versionnée : mise à jour par GitHub Actions)
+├── .github/workflows/
+│   └── mise-a-jour.yml       # mise à jour automatique 3 fois par jour
+├── tests/                    # un fichier de test par module + test_api.py
+└── web/                      # front-end Next.js
+    ├── app/page.tsx          # accueil (UC1)
+    ├── app/action/[ticker]/  # détail d'une action (UC2, UC3)
+    ├── components/           # graphique, jauge, cartes, en-tête
+    └── lib/                  # appels à l'API, mise en forme
 ```
- 
+
 ---
- 
+
 ## Base de données
  
 | Table | Colonnes principales |
@@ -172,62 +172,73 @@ SQLite suffit pour le prototype. Grâce à SQLAlchemy, on peut passer à Postgre
 ---
  
 ## Installation
- 
-Prérequis : Python 3.11 ou plus récent, et Git.
- 
+
+Prérequis : Python 3.11 ou plus récent, Node.js 20 ou plus récent, et Git.
+
 ```bash
 git clone <url-du-depot>
-cd conseiller-bourse
- 
+cd Finance_esigelec2
+
+# Python
 python -m venv .venv
 # Windows
 .venv\Scripts\activate
 # macOS / Linux
 source .venv/bin/activate
- 
 pip install -r requirements.txt
+
+# Front-end
+cd web
+npm install
+cd ..
 ```
- 
+
+Facultatif : installer [Ollama](https://ollama.com) puis `ollama pull qwen2.5:7b` pour que les actualités
+soient notées par le LLM. Sans Ollama, un lexique de mots-clés prend le relais.
+
 ---
- 
+
 ## Configuration
- 
+
 Copier le modèle de configuration, puis le remplir :
- 
+
 ```bash
 cp .env.example .env
 ```
- 
+
 ```env
-LLM_API_KEY=votre_cle_api
-DATABASE_URL=sqlite:///bourse.db
 NOM_CLIENT=Monsieur Dupont
+DATABASE_URL=sqlite:///bourse.db
+LLM_MODELE=qwen2.5:7b
+LLM_URL=http://localhost:11434
 ```
- 
+
 ⚠️ Ne jamais publier le fichier `.env` sur GitHub : il est listé dans `.gitignore`.
- 
+
 Les poids et les seuils se règlent dans `config.py`.
- 
+
 ---
- 
+
 ## Lancement
- 
+
 ```bash
-# 1. Créer la base et charger les données
+# 1. (facultatif) Recharger les données et recalculer les conseils
 python data.py
- 
-# 2. Calculer les notes et les conseils
 python decision.py
- 
-# 3. Lancer l'interface
-streamlit run app.py
+
+# 2. Lancer l'API (terminal 1, à la racine du projet)
+uvicorn api:app --port 8000
+
+# 3. Lancer le site (terminal 2)
+cd web
+npm run dev
 ```
- 
-L'application s'ouvre dans le navigateur à l'adresse `http://localhost:8501`.
-Le bouton **Actualiser** relance les étapes 1 et 2 sans quitter l'interface.
- 
+
+Le site s'ouvre à l'adresse `http://localhost:3000` ; la documentation de l'API est sur `http://localhost:8000/docs`.
+Le bouton **Actualiser** relance l'étape 1 en arrière-plan sans quitter le site.
+
 ---
- 
+
 ## Tests
  
 ```bash
@@ -249,7 +260,7 @@ Chaque module a son fichier de test. Exemples de cas vérifiés :
 | JP | Module Information | `module_info.py` |
 | KONATE Boubacar | Analyse technique + coordination des livrables | `module_technique.py`, `docs/` |
 | Axel | Financier, risque et décision | `module_financier.py`, `decision.py` |
-| RIVIERE Constance | Front-end | `app.py` |
+| RIVIERE Constance | Front-end | `web/` (Next.js), `api.py` |
  
 **Méthode de travail** : une branche Git par module, et une pull request relue par un autre membre avant chaque fusion.
  
@@ -267,7 +278,6 @@ Chaque module a son fichier de test. Exemples de cas vérifiés :
 - API de news professionnelle avec sentiment (EODHD, MarketAux).
 - Backtest sur plusieurs années pour valider les poids et les seuils.
 - Optimisation des poids par machine learning.
-- Simulation Monte-Carlo pour le module Risque.
 - Conseil de montant (combien acheter ou vendre sur les 500 000 €).
-- Passage à PostgreSQL et mise à jour automatique toutes les 15 minutes.
+- Passage à PostgreSQL et mise à jour plus fréquente (aujourd'hui 3 fois par jour via GitHub Actions).
  
