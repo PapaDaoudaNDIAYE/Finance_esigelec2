@@ -120,10 +120,20 @@ export class ErreurApi extends Error {}
 
 export async function appeler<T>(chemin: string, options?: RequestInit): Promise<T> {
   let reponse: Response;
+  // Jamais d'attente sans fin : 25 s pour une lecture, 58 s pour une mise à jour (Vercel coupe à 60 s).
+  const delai = options?.method === "POST" ? 58000 : 25000;
+  const arret = new AbortController();
+  const minuteur = setTimeout(() => arret.abort(), delai);
   try {
-    reponse = await fetch(chemin, { cache: "no-store", ...options });
+    reponse = await fetch(chemin, { cache: "no-store", ...options, signal: arret.signal });
   } catch {
-    throw new ErreurApi("Le serveur d'analyse ne répond pas.");
+    throw new ErreurApi(
+      arret.signal.aborted
+        ? "Le serveur met trop de temps à répondre. Réessayez dans un instant."
+        : "Le serveur d'analyse ne répond pas.",
+    );
+  } finally {
+    clearTimeout(minuteur);
   }
   if (!reponse.ok) {
     if (reponse.status === 404) throw new ErreurApi("Cette action n'est pas suivie par le conseiller.");

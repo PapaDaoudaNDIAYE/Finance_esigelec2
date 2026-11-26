@@ -48,7 +48,7 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import (Boolean, Column, Float, MetaData, String, Table, Text, and_,
-                        create_engine, delete, func, insert, select)
+                        create_engine, delete, event, func, insert, select)
 
 # Chemins calculés depuis l'emplacement de ce fichier : ils ne dépendent pas du dossier courant.
 DOSSIER = os.path.dirname(os.path.abspath(__file__))
@@ -206,18 +206,56 @@ def get_engine(url: str | None = None):
     """
     url = normaliser_url(url) if url else url_base()
     if url.startswith("postgresql"):
-        return create_engine(url, pool_pre_ping=True, pool_size=1, max_overflow=2)
+        engine = create_engine(url, pool_pre_ping=True, pool_size=1, max_overflow=2,
+                               connect_args={"connect_timeout": 10})
+        event.listen(engine, "connect", _limites_postgresql)
+        return engine
     return create_engine(url)
+
+
+def _limites_postgresql(connexion, _record) -> None:
+    """Garde-fous PostgreSQL, posés à chaque nouvelle connexion. Sur Vercel, une fonction
+    coupée à 60 s peut laisser une transaction ouverte qui verrouille des lignes : sans ces
+    limites, toutes les requêtes suivantes attendraient ce verrou indéfiniment.
+        lock_timeout       : abandonner après 10 s d'attente d'un verrou ;
+        statement_timeout  : aucune requête de plus de 30 s ;
+        idle_in_transaction_session_timeout : la base ferme d'elle-même une transaction
+                             abandonnée depuis 30 s (et libère ses verrous)."""
+    try:
+        with connexion.cursor() as cur:
+            cur.execute("SET lock_timeout = '10s'")
+            cur.execute("SET statement_timeout = '30s'")
+            cur.execute("SET idle_in_transaction_session_timeout = '30s'")
+        connexion.commit()
+    except Exception:            # réglage refusé (droits, proxy...) : on continue sans
+        try:
+            connexion.rollback()
+        except Exception:
+            pass
 
 
 def creer_base(engine=None):
     """Crée les tables manquantes et remplit la table « actions ». Sans danger si déjà fait :
     les tables existantes et leurs données ne sont pas touchées."""
     engine = engine or get_engine()
+    if "*" in _verifiees(engine):    # déjà fait par ce processus : rien à refaire
+        return engine
     metadata.create_all(engine)
     lignes = [{"ticker": t, **ACTIONS.get(t, {"nom": t, "secteur": None})} for t in TICKERS]
-    _remplacer(engine, actions, lignes, ["ticker"])
+    # On n'écrit que si la table « actions » n'est pas déjà à jour : une écriture à chaque
+    # démarrage attendrait (sur PostgreSQL) les verrous d'une autre mise à jour en cours.
+    presentes = {l["ticker"]: l for l in _lire(engine, select(actions))}
+    if any({k: presentes.get(l["ticker"], {}).get(k) for k in l} != l for l in lignes):
+        _remplacer(engine, actions, lignes, ["ticker"])
+    _verifiees(engine).add("*")
     return engine
+
+
+def _verifiees(engine) -> set:
+    """Tables dont l'existence a déjà été vérifiée sur ce moteur (« * » : toutes)."""
+    if not hasattr(engine, "_tables_verifiees"):
+        engine._tables_verifiees = set()
+    return engine._tables_verifiees
 
 
 def _remplacer(engine, table, lignes: list[dict], cles: list[str]) -> int:
@@ -232,7 +270,9 @@ def _remplacer(engine, table, lignes: list[dict], cles: list[str]) -> int:
     """
     if not lignes:
         return 0
-    metadata.create_all(engine, tables=[table])   # au cas où la table n'existe pas encore
+    if not _verifiees(engine) & {"*", table.name}:        # au cas où la table n'existe pas encore
+        metadata.create_all(engine, tables=[table])       # (vérifié une fois par moteur :
+        _verifiees(engine).add(table.name)                #  chaque vérification = un aller-retour)
     colonnes = set(table.c.keys())
     lignes = [{k: v for k, v in l.items() if k in colonnes} for l in lignes]   # ignore les colonnes inconnues
     # Toutes les lignes doivent avoir les mêmes colonnes pour un envoi groupé ; une colonne

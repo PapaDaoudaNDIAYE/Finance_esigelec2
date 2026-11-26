@@ -106,3 +106,17 @@ def test_migration_relancee_sans_doublon(tmp_path):
     cible = db.get_engine(cible_url)
     assert db.lire_clotures(cible, "AI.PA") == [150.0, 151.0]
     assert len(db.lire_actions(cible)) == 5
+
+
+def test_creer_base_n_ecrit_pas_si_deja_a_jour(monkeypatch):
+    """Au démarrage, la table « actions » n'est réécrite que si elle a changé (sur PostgreSQL,
+    une écriture à chaque démarrage attendrait les verrous d'une mise à jour en cours)."""
+    import tempfile
+    url = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'b.db')}"
+    db.creer_base(db.get_engine(url))                    # 1er démarrage : remplit « actions »
+    ecritures = []
+    reel = db._remplacer
+    monkeypatch.setattr(db, "_remplacer", lambda *a, **k: ecritures.append(a[1].name) or reel(*a, **k))
+    engine = db.creer_base(db.get_engine(url))           # 2e démarrage (nouveau processus)
+    assert "actions" not in ecritures
+    assert len(db._lire(engine, db.select(db.actions))) == len(db.TICKERS)
