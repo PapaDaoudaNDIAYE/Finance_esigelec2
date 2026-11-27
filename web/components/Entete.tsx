@@ -11,7 +11,9 @@ import { dateHeure } from "@/lib/format";
 export default function Entete({ etat, quandActualise }: { etat: Etat | null; quandActualise: () => void }) {
   const { tache, lancer, fermer } = useActualisation(quandActualise, etat?.mise_a_jour);
   const enCours = !!tache?.en_cours;
-  const surPortefeuille = (usePathname() ?? "").startsWith("/portefeuille");
+  const chemin = usePathname() ?? "/";
+  const surPortefeuille = chemin.startsWith("/portefeuille");
+  const surAnalyses = chemin.startsWith("/actions") || chemin.startsWith("/action/");
   const { profil, regles, ouvrirChoix } = useProfil();
 
   return (
@@ -27,7 +29,8 @@ export default function Entete({ etat, quandActualise }: { etat: Etat | null; qu
         </Link>
 
         <nav className="nav" aria-label="Navigation principale">
-          <Link href="/" className={surPortefeuille ? "" : "actif"}>Analyses</Link>
+          <Link href="/" className={chemin === "/" ? "actif" : ""}>Accueil</Link>
+          <Link href="/actions/" className={surAnalyses ? "actif" : ""}>Actions</Link>
           <Link href="/portefeuille/" className={surPortefeuille ? "actif" : ""}>Portefeuille</Link>
         </nav>
 

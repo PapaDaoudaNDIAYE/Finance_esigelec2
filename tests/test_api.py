@@ -140,6 +140,7 @@ def test_le_site_est_servi_apres_les_routes_api():
         accueil = client.get("/")
         assert accueil.status_code == 200 and "text/html" in accueil.headers["content-type"]
         assert client.get("/action/AI.PA/").status_code == 200
+        assert client.get("/actions/").status_code == 200          # liste des 5 actions
 
 
 def test_bouton_actualiser_sur_vercel_met_a_jour_tout_de_suite(monkeypatch):

@@ -42,7 +42,7 @@ export default function Detail({ ticker }: { ticker: string }) {
     <>
       <Entete etat={etat.data} quandActualise={toutRecharger} />
 
-      <Link href="/" className="retour">← Toutes les actions</Link>
+      <Link href="/actions/" className="retour">← Toutes les actions</Link>
 
       {detail.erreur && !a ? (
         <EtatErreur message={detail.erreur} onReessayer={toutRecharger} />
